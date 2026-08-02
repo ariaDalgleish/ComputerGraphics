@@ -10,7 +10,35 @@
 #include <freeglut.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 
+ /******************************************************************************
+  * Particles set up structs
+  ******************************************************************************/
+
+typedef struct {
+	float x;
+	float y;
+} Position2;
+
+typedef struct {
+	Position2 position; // x y location of particle
+	float size;
+	float vx, vy;
+	float age;       // seconds alive
+	float lifetime;  // seconds to live
+	int active; // 0 = inactive
+} Particle_t;
+
+#define MAX_PARTICLES 1000
+
+static Particle_t particles[MAX_PARTICLES];
+void particles_init(void);
+void spawn_particles(int count);
+void particles_update(float dt);
+void particles_draw(void);
+void particle_test_draw(void);
 
  /******************************************************************************
   * Animation & Timing Setup
@@ -99,7 +127,7 @@ void main(int argc, char** argv)
  * GLUT Callbacks (don't add any other functions here)
  ******************************************************************************/
 
- /*
+/*
 	 Called when GLUT wants us to (re)draw the current animation frame.
 
 	 Note: This function must not do anything to update the state of our simulated
@@ -113,15 +141,28 @@ void display(void)
 	else
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-	/*
-		TEMPLATE: REPLACE THIS COMMENT WITH YOUR DRAWING CODE
+	
+		//: REPLACE THIS COMMENT WITH YOUR DRAWING CODE
+			/* Drawing: clear, draw test particle, draw active particles */
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-		Separate reusable pieces of drawing code into functions, which you can add
-		to the "Animation-Specific Functions" section below.
+		//Separate reusable pieces of drawing code into functions, which you can add
+		//to the "Animation-Specific Functions" section below.
 
-		Remember to add prototypes for any new functions to the "Animation-Specific
-		Function Prototypes" section near the top of this template.
-	*/
+	/* Basic modelview/projection reset (simple 2D drawing in clip space) */
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+
+		//Remember to add prototypes for any new functions to the "Animation-Specific
+		//Function Prototypes" section near the top of this template.
+	
+	/* Draw a single test particle at a known location*/
+	particle_test_draw();
+	/* Draw all active particles in the particle system */
+	particles_draw();
+	/* Present the rendered image */
+	glutSwapBuffers();
 
 }
 
@@ -191,6 +232,19 @@ void idle(void)
  */
 void init(void)
 {
+	/* Basic GL setup for point rendering and random seed */
+	glPointSize(4.0f);
+	glEnable(GL_POINT_SMOOTH);
+	// GL_POINT_SMOOTH_HINT is a hint to OpenGL about the quality of point smoothing.
+	// GL_NICEST indicates that we want the highest quality smoothing,
+	// which may be slower but will produce better visual results.
+	glHint(GL_POINT_SMOOTH_HINT, GL_NICEST); 
+	// enables lighting calculations for 3D objects.
+	glDisable(GL_LIGHTING);
+
+	// Seed the random number generator for particle randomness.
+	srand((unsigned int)time(NULL)); 
+	particles_init(); // Initialize the particle system.
 }
 
 /*
@@ -200,6 +254,7 @@ void init(void)
 	frame is drawn, EXCEPT the very first frame drawn after our application
 	starts. Any setup required before the first frame is drawn should be placed
 	in init().  
+	Advance our animation by FRAME_TIME seconds (FRAME_TIME_SEC)
 */
 void think(void)
 {
@@ -242,6 +297,98 @@ void think(void)
 		You can use this same approach to animate other things like color, opacity,
 		brightness of lights, etc.
 	*/
+	/* Spawn a few new particles each frame for demonstration */
+	spawn_particles(6);
+	/* Update particle dynamics using fixed timestep in seconds */
+	particles_update(FRAME_TIME_SEC);
 }
+
+/* Initialise the particle system by marking all particles as inactive */
+void particles_init(void)
+{
+	for (int i = 0; i < MAX_PARTICLES; ++i) {
+		particles[i].active = 0;
+		particles[i].age = 0.0f;
+	}
+}
+
+/* Spawn up to 'count' new particles by recycling inactive slots*/
+void spawn_particles(int count)
+{
+	for (int c = 0; c < count; ++c) {
+		for (int i = 0; i < MAX_PARTICLES; ++i) {
+			if (!particles[i].active) {
+				/* initialize attributes (positions in clip-space [-1,1]) */
+				particles[i].position.x = ((float)rand() / RAND_MAX) * 2.0f - 1.0f; 
+				particles[i].position.y = 1.0f; // spawn top of screen
+				particles[i].vx = ((float)rand() / RAND_MAX) * 1.0f - 0.5f; // horizontal spread
+				particles[i].vy = -((float)rand() / RAND_MAX) * 0.6f - 0.1f; // initial downward velocity
+				particles[i].size = ((float)rand() / RAND_MAX) * 6.0f + 2.0f;
+				particles[i].age = 0.0f;
+				particles[i].lifetime = 1.0f + ((float)rand() / RAND_MAX) * 3.0f; // 1..4s
+				particles[i].active = 1;
+				break; /* spawn one particle per call to this function */
+			}
+		}
+	}
+}
+
+void particles_update(float dt)
+{
+	const float gravity = -0.98f; /* units per second^2 (tuned for demo) */
+	for (int i = 0; i < MAX_PARTICLES; ++i) {
+		if (!particles[i].active) continue;
+
+		particles[i].age += dt;
+		if (particles[i].age > particles[i].lifetime) {
+			particles[i].active = 0; /* deactivate for reuse*/
+			continue;
+		}
+		/* Integrate velocity/position */
+		particles[i].vy += gravity * dt;
+		particles[i].position.x += particles[i].vx * dt;
+		particles[i].position.y += particles[i].vy * dt;
+
+		/* Extinction: out of view*/
+		if (particles[i].position.y < -1.5f ||
+			particles[i].position.x < -2.0f || 
+			particles[i].position.x > 2.0f) {
+			particles[i].active = 0;
+		}
+	}
+}
+
+
+/* Draw all active particles as GL_POINTS */
+void particles_draw(void)
+{
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	for (int i = 0; i < MAX_PARTICLES; ++i) {
+		if (!particles[i].active) continue;
+		/* size and color vary with age */
+		float t = particles[i].age / particles[i].lifetime;
+		float alpha = 1.0f - t;
+		glColor4f(1.0f, 1.0f, 1.0f, alpha);
+		glPointSize(particles[i].size);
+		glBegin(GL_POINTS);
+		glVertex2f(particles[i].position.x, particles[i].position.y);
+		glEnd();
+	}
+	glDisable(GL_BLEND);
+}
+
+/* Test draw: create a known particle and draw as a point primitive. Called from display() */
+//void particle_test_draw(void)
+//{
+//	/* Known position in clip-space */
+//	float tx = 0.0f;
+//	float ty = 0.0f;
+//	glColor3f(1.0f, 1.0f, 1.0f);
+//	glPointSize(8.0f);
+//	glBegin(GL_POINTS);
+//	glVertex2f(tx, ty);
+//	glEnd();
+//}
 
 /**************************************2026*S2****************************************/
