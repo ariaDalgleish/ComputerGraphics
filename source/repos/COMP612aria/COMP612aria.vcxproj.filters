@@ -15,7 +15,22 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Animation.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Dots.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Followingeyes.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="RotateSquareExercise.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rotateSquareTut.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="soureCode.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

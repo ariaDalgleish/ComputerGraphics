@@ -150,7 +150,12 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Animation.c" />
+    <ClCompile Include="Dots.c" />
     <ClCompile Include="Followingeyes.c" />
+    <ClCompile Include="RotateSquareExercise.c" />
+    <ClCompile Include="rotateSquareTut.c" />
+    <ClCompile Include="soureCode.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
