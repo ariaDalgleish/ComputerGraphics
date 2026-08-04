@@ -24,7 +24,7 @@
     <ProjectGuid>{10a8a574-29c0-46bd-92d4-d2bdc6d285ef}</ProjectGuid>
     <RootNamespace>COMP612aria</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-    <ProjectName>COMP612Week2Exercises</ProjectName>
+    <ProjectName>COMP612Snow</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -151,6 +151,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Animation.c" />
+    <ClCompile Include="TestGLUT.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

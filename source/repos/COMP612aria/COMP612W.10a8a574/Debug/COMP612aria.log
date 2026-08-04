@@ -1,4 +1,5 @@
-﻿  Animation.c
+﻿  soureCode.c
+C:\Users\tdp6747\Documents\GitHub\ComputerGraphics\source\repos\COMP612aria\soureCode.c(67,18): warning C4113: 'void (__cdecl *)()' differs in parameter lists from 'void (__cdecl *)(void)'
   COMP612aria.vcxproj -> C:\Users\tdp6747\Documents\GitHub\ComputerGraphics\source\repos\COMP612aria\Debug\COMP612Week2Exercises.exe
   C:\Users\tdp6747\Documents\GitHub\ComputerGraphics\source\repos\COMP612aria\freeglut\bin\freeglut.dll
   1 File(s) copied

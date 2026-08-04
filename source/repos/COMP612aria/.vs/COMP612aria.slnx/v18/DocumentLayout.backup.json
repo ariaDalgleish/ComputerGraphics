@@ -5,6 +5,10 @@
     {
       "AbsoluteMoniker": "D:0:0:{10A8A574-29C0-46BD-92D4-D2BDC6D285EF}|COMP612aria.vcxproj|C:\\Users\\tdp6747\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\COMP612aria\\Animation.c||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
       "RelativeMoniker": "D:0:0:{10A8A574-29C0-46BD-92D4-D2BDC6D285EF}|COMP612aria.vcxproj|solutionrelative:Animation.c||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{10A8A574-29C0-46BD-92D4-D2BDC6D285EF}|COMP612aria.vcxproj|C:\\Users\\tdp6747\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\COMP612aria\\TestGLUT.c||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{10A8A574-29C0-46BD-92D4-D2BDC6D285EF}|COMP612aria.vcxproj|solutionrelative:TestGLUT.c||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
     }
   ],
   "DocumentGroupContainers": [
@@ -17,8 +21,17 @@
           "SelectedChildIndex": 1,
           "Children": [
             {
-              "$type": "Bookmark",
-              "Name": "ST:0:0:{aa2115a1-9712-457b-9047-dbb71ca2cdd2}"
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "TestGLUT.c",
+              "DocumentMoniker": "C:\\Users\\tdp6747\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\COMP612aria\\TestGLUT.c",
+              "RelativeDocumentMoniker": "TestGLUT.c",
+              "ToolTip": "C:\\Users\\tdp6747\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\COMP612aria\\TestGLUT.c",
+              "RelativeToolTip": "TestGLUT.c",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000423|",
+              "WhenOpened": "2026-08-04T03:46:56.992Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
@@ -28,10 +41,14 @@
               "RelativeDocumentMoniker": "Animation.c",
               "ToolTip": "C:\\Users\\tdp6747\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\COMP612aria\\Animation.c",
               "RelativeToolTip": "Animation.c",
-              "ViewState": "AgIAADQBAAAAAAAAAAAwwEEBAABFAAAAAAAAAA==",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAkAAAAVAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000423|",
-              "WhenOpened": "2026-08-02T21:54:30.43Z",
+              "WhenOpened": "2026-08-04T03:45:55.12Z",
               "EditorCaption": ""
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{aa2115a1-9712-457b-9047-dbb71ca2cdd2}"
             }
           ]
         }

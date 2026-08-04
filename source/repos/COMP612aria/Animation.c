@@ -16,12 +16,13 @@
  /******************************************************************************
   * Particles set up structs
   ******************************************************************************/
-
+  // purpose of this struct is to hold the position of a particle in 2D space (x and y coordinates)
 typedef struct {
 	float x;
 	float y;
 } Position2;
 
+// purpose of this struct is to hold the properties of a particle, including its position, size, velocity, age, lifetime, and active status
 typedef struct {
 	Position2 position; // x y location of particle
 	float size;
@@ -379,16 +380,16 @@ void particles_draw(void)
 }
 
 /* Test draw: create a known particle and draw as a point primitive. Called from display() */
-//void particle_test_draw(void)
-//{
-//	/* Known position in clip-space */
-//	float tx = 0.0f;
-//	float ty = 0.0f;
-//	glColor3f(1.0f, 1.0f, 1.0f);
-//	glPointSize(8.0f);
-//	glBegin(GL_POINTS);
-//	glVertex2f(tx, ty);
-//	glEnd();
-//}
+void particle_test_draw(void)
+{
+	/* Known position in clip-space */
+	float tx = 0.0f;
+	float ty = 0.0f;
+	glColor3f(1.0f, 1.0f, 1.0f);
+	glPointSize(8.0f);
+	glBegin(GL_POINTS);
+	glVertex2f(tx, ty);
+	glEnd();
+}
 
 /**************************************2026*S2****************************************/
