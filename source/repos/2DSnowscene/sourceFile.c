@@ -30,14 +30,26 @@ typedef struct {
 	float age;       // seconds alive
 	float lifetime;  // seconds to live
 	int active; // 0 = inactive
+
 } Particle_t;
 
 #define MAX_PARTICLES 1000
 
 static Particle_t particles[MAX_PARTICLES];
+/******************************************************************************
+  * Global Particle Variables
+  ******************************************************************************/
+float particleGravity = 0.0f;        // used in update_particles() negative = downward
+float particleInitVyScale = 0.20f;     // used in spawn_particle() controls initial downward speed
+float particleInitVxScale = 0.05f;     // used in spawn_particle() controls horizontal spread
+float spawnRate = 10.0f;           // particles/sec (start)
+float spawnAccumulator = 0.0f;	// used to track time between spawns
+float spawnGrowthPerSec = 0.5f;  // particles/sec^2 (increase spawn rate over time)
+float spawnRateMax = 12.0f;       // cap
+
 void particles_init(void);
 void spawn_particles(int count);
-void particles_update(float dt);
+void particles_update(float dt); // dt = delta time in seconds since last update
 void particles_draw(void);
 void particle_test_draw(void);
 
@@ -145,7 +157,7 @@ void display(void)
 
 	//: REPLACE THIS COMMENT WITH YOUR DRAWING CODE
 		/* Drawing: clear, draw test particle, draw active particles */
-	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClearColor(0.257f, 0.746f, 0.99f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	//Separate reusable pieces of drawing code into functions, which you can add
@@ -234,7 +246,7 @@ void idle(void)
 void init(void)
 {
 	/* Basic GL setup for point rendering and random seed */
-	glPointSize(4.0f);
+	glPointSize(1.0f);
 	glEnable(GL_POINT_SMOOTH);
 	// GL_POINT_SMOOTH_HINT is a hint to OpenGL about the quality of point smoothing.
 	// GL_NICEST indicates that we want the highest quality smoothing,
@@ -299,8 +311,20 @@ void think(void)
 		brightness of lights, etc.
 	*/
 	/* Spawn a few new particles each frame for demonstration */
-	spawn_particles(6);
+	//spawn_particles(6);
 	/* Update particle dynamics using fixed timestep in seconds */
+	//particles_update(FRAME_TIME_SEC);
+
+	spawnAccumulator += spawnRate * FRAME_TIME_SEC;          // accumulate fractional particles
+	int toSpawn = (int)spawnAccumulator;
+	if (toSpawn > 0) {
+		spawn_particles(toSpawn);
+		spawnAccumulator -= toSpawn;
+	}
+	/* subtle growth */
+
+	spawnRate += spawnGrowthPerSec * FRAME_TIME_SEC;
+	if (spawnRate > spawnRateMax) spawnRate = spawnRateMax;
 	particles_update(FRAME_TIME_SEC);
 }
 
@@ -322,11 +346,15 @@ void spawn_particles(int count)
 				/* initialize attributes (positions in clip-space [-1,1]) */
 				particles[i].position.x = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
 				particles[i].position.y = 1.0f; // spawn top of screen
-				particles[i].vx = ((float)rand() / RAND_MAX) * 1.0f - 0.5f; // horizontal spread
-				particles[i].vy = -((float)rand() / RAND_MAX) * 0.6f - 0.1f; // initial downward velocity
-				particles[i].size = ((float)rand() / RAND_MAX) * 6.0f + 2.0f;
+				particles[i].vx = ((float)rand() / RAND_MAX) * 2.0f * particleInitVxScale - particleInitVxScale; // random horizontal velocity
+				particles[i].vy = -((float)rand() / RAND_MAX) * particleInitVyScale - 0.1f; // random downward velocity
+
+				
+				//particles[i].vx = ((float)rand() / RAND_MAX) * 1.0f - 0.5f; // horizontal spread
+				//particles[i].vy = -((float)rand() / RAND_MAX) * 0.1f - 0.5f; // initial downward velocity
+				particles[i].size = ((float)rand() / RAND_MAX) * 3.0f + 1.5f; // random size between 2.0 and 5.0
 				particles[i].age = 0.0f;
-				particles[i].lifetime = 1.0f + ((float)rand() / RAND_MAX) * 3.0f; // 1..4s
+				particles[i].lifetime = 5.0f + ((float)rand() / RAND_MAX) * 10.0f; // 1..11s
 				particles[i].active = 1;
 				break; /* spawn one particle per call to this function */
 			}
@@ -336,7 +364,8 @@ void spawn_particles(int count)
 
 void particles_update(float dt)
 {
-	const float gravity = -0.98f; /* units per second^2 (tuned for demo) */
+	const float gravity = particleGravity;
+	//const float gravity = -0.98f; /* units per second^2 (tuned for demo) */
 	for (int i = 0; i < MAX_PARTICLES; ++i) {
 		if (!particles[i].active) continue;
 
@@ -347,8 +376,8 @@ void particles_update(float dt)
 		}
 		/* Integrate velocity/position */
 		particles[i].vy += gravity * dt;
-		particles[i].position.x += particles[i].vx * dt;
-		particles[i].position.y += particles[i].vy * dt;
+		particles[i].position.x += particles[i].vx * dt; // update position based on velocity
+		particles[i].position.y += particles[i].vy * dt; 
 
 		/* Extinction: out of view*/
 		if (particles[i].position.y < -1.5f ||
@@ -369,7 +398,7 @@ void particles_draw(void)
 		if (!particles[i].active) continue;
 		/* size and color vary with age */
 		float t = particles[i].age / particles[i].lifetime;
-		float alpha = 1.0f - t;
+		float alpha = 0.8f - t;
 		glColor4f(1.0f, 1.0f, 1.0f, alpha);
 		glPointSize(particles[i].size);
 		glBegin(GL_POINTS);
