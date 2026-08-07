@@ -52,6 +52,7 @@ void spawn_particles(int count);
 void particles_update(float dt); // dt = delta time in seconds since last update
 void particles_draw(void);
 void particle_test_draw(void);
+void drawBackgroundGradient(void);
 
 /******************************************************************************
  * Animation & Timing Setup
@@ -157,9 +158,10 @@ void display(void)
 
 	//: REPLACE THIS COMMENT WITH YOUR DRAWING CODE
 		/* Drawing: clear, draw test particle, draw active particles */
-	glClearColor(0.257f, 0.746f, 0.99f, 1.0f);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+	drawBackgroundGradient();
 	//Separate reusable pieces of drawing code into functions, which you can add
 	//to the "Animation-Specific Functions" section below.
 
@@ -379,7 +381,7 @@ void particles_update(float dt)
 		particles[i].position.x += particles[i].vx * dt; // update position based on velocity
 		particles[i].position.y += particles[i].vy * dt; 
 
-		/* Extinction: out of view*/
+		/* Extinction: out of view*/ 
 		if (particles[i].position.y < -1.5f ||
 			particles[i].position.x < -2.0f ||
 			particles[i].position.x > 2.0f) {
@@ -420,5 +422,39 @@ void particle_test_draw(void)
 	glVertex2f(tx, ty);
 	glEnd();
 }
+
+void drawBackgroundGradient(void)
+{
+	/* Draw a full-screen quad with interpolated colors (top->bottom gradient).
+	   Disable depth write/test so it doesn't occlude scene geometry. */
+	glDisable(GL_DEPTH_TEST);
+	glDepthMask(GL_FALSE);
+
+	/* Preserve and reset projection/modelview so quad covers clip-space [-1,1]. */
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix(); glLoadIdentity();
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix(); glLoadIdentity();
+
+	glBegin(GL_QUADS);
+	/* top (lighter) */
+	glColor3f(0.161f, 0.596f, 0.776f); glVertex2f(-1.0f, 1.0f);
+	glColor3f(0.161f, 0.596f, 0.776f); glVertex2f(1.0f, 1.0f);
+	/* bottom (darker) */
+	glColor3f(0.51f, 0.784f, 0.898f); glVertex2f(1.0f, -1.0f);
+	glColor3f(0.51f, 0.784f, 0.898f); glVertex2f(-1.0f, -1.0f);
+	glEnd();
+
+	/* restore matrices */
+	glPopMatrix(); /* MODELVIEW */
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+	glMatrixMode(GL_MODELVIEW);
+
+	/* restore depth state */
+	glDepthMask(GL_TRUE);
+	glEnable(GL_DEPTH_TEST);
+}
+
 
 /**************************************2026*S2****************************************/
