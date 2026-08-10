@@ -93,6 +93,7 @@ void display(void);
 void reshape(int width, int h);
 void keyPressed(unsigned char key, int x, int y);
 void idle(void);
+void mouseMoved(int x, int y);
 
 /******************************************************************************
  * Animation-Specific Function Prototypes (add your own here)
@@ -101,11 +102,27 @@ void idle(void);
 void main(int argc, char** argv);
 void init(void);
 void think(void);
+void drawCircle(float cx, float cy, float radius, int segments);
+void drawEye(float cx, float cy);
 
 /******************************************************************************
  * Animation-Specific Setup (Add your own definitions, constants, and globals here)
  ******************************************************************************/
+#define EYE_RADIUS      90.0f
+#define PUPIL_RADIUS    30.0f
+#define PUPIL_MARGIN    12.0f
+#define MAX_PUPIL_OFFSET (EYE_RADIUS - PUPIL_RADIUS - PUPIL_MARGIN)
 
+const float leftEyeX = 300.0f;
+const float rightEyeX = 500.0f;
+const float eyeY = 400.0f;
+
+// Latest mouse position in world coordinates (set by mouseMoved, used by think()).
+float mouseWorldX = 400.0f;
+float mouseWorldY = 400.0f;
+ // Current pupil offsets from their eye centres (set by think()).
+float leftPupilOffsetX = 0.0f, leftPupilOffsetY = 0.0f;
+float rightPupilOffsetX = 0.0f, rightPupilOffsetY = 0.0f;
  /******************************************************************************
   * Entry Point (don't put anything except the main function here)
   ******************************************************************************/
@@ -129,6 +146,7 @@ void main(int argc, char** argv)
 	glutReshapeFunc(reshape);
 	glutKeyboardFunc(keyPressed);
 	glutIdleFunc(idle);
+	glutPassiveMotionFunc(mouseMoved);
 
 	// Record when we started rendering the very first frame (which should happen after we call glutMainLoop).
 	frameStartTime = (unsigned int)glutGet(GLUT_ELAPSED_TIME);
@@ -151,9 +169,11 @@ void main(int argc, char** argv)
 void display(void)
 {
 	if (!renderFillEnabled)
-		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); 
+	// Set polygon mode to wireframe (GL_LINE) for both front and back faces
 	else
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	// Set polygon mode to filled (GL_FILL) for both front and back faces
 
 
 	//: REPLACE THIS COMMENT WITH YOUR DRAWING CODE
@@ -178,6 +198,9 @@ void display(void)
 	particles_draw();
 	/* Present the rendered image */
 	glutSwapBuffers();
+
+	drawEye(leftEyeX, eyeY);
+	drawEye(rightEyeX, eyeY);
 
 }
 
@@ -207,6 +230,12 @@ void keyPressed(unsigned char key, int x, int y)
 		exit(0);
 		break;
 	}
+}
+
+void mouseMoved(int x, int y)
+{
+	mouseWorldX = (float)x;
+	mouseWorldY = (float)(windowHeight - y);
 }
 
 /*
@@ -316,12 +345,38 @@ void think(void)
 	//spawn_particles(6);
 	/* Update particle dynamics using fixed timestep in seconds */
 	//particles_update(FRAME_TIME_SEC);
+	float dx, dy, dist;
+
+	dx = mouseWorldX - leftEyeX;
+	dy = mouseWorldY - eyeY;
+	dist = sqrtf(dx * dx + dy * dy);
+	if (dist > MAX_PUPIL_OFFSET && dist > 0.0f)
+	{
+		dx = dx / dist * MAX_PUPIL_OFFSET;
+		dy = dy / dist * MAX_PUPIL_OFFSET;
+	}
+	leftPupilOffsetX = dx;
+	leftPupilOffsetY = dy;
+
+	dx = mouseWorldX - rightEyeX;
+	dy = mouseWorldY - eyeY;
+	dist = sqrtf(dx * dx + dy * dy);
+	if (dist > MAX_PUPIL_OFFSET && dist > 0.0f)
+	{
+		dx = dx / dist * MAX_PUPIL_OFFSET;
+		dy = dy / dist * MAX_PUPIL_OFFSET;
+	}
+	rightPupilOffsetX = dx;
+	rightPupilOffsetY = dy;
+
 
 	spawnAccumulator += spawnRate * FRAME_TIME_SEC;          // accumulate fractional particles
 	int toSpawn = (int)spawnAccumulator;
 	if (toSpawn > 0) {
 		spawn_particles(toSpawn);
 		spawnAccumulator -= toSpawn;
+
+
 	}
 	/* subtle growth */
 
@@ -456,5 +511,39 @@ void drawBackgroundGradient(void)
 	glEnable(GL_DEPTH_TEST);
 }
 
+void drawCircle(float cx, float cy, float radius, int segments)
+{
+	int i;
+	glBegin(GL_TRIANGLE_FAN);
+	glVertex2f(cx, cy);
+	for (i = 0; i <= segments; i++)
+	{
+		float angle = 2.0f * 3.1415926f * (float)i / (float)segments;
+		glVertex2f(cx + cosf(angle) * radius, cy + sinf(angle) * radius);
+	}
+	glEnd();
+}
+
+void drawEye(float cx, float cy)
+{
+	float pupilOffsetX = (cx == leftEyeX) ? leftPupilOffsetX : rightPupilOffsetX;
+	float pupilOffsetY = (cx == leftEyeX) ? leftPupilOffsetY : rightPupilOffsetY;
+
+	glColor3f(1.0f, 1.0f, 1.0f);
+	drawCircle(cx, cy, EYE_RADIUS, 60);
+
+	glColor3f(0.0f, 0.0f, 0.0f);
+	glLineWidth(2.0f);
+	glBegin(GL_LINE_LOOP);
+	for (int i = 0; i < 60; i++)
+	{
+		float angle = 2.0f * 3.1415926f * (float)i / 60.0f;
+		glVertex2f(cx + cosf(angle) * EYE_RADIUS, cy + sinf(angle) * EYE_RADIUS);
+	}
+	glEnd();
+
+	glColor3f(0.05f, 0.05f, 0.05f);
+	drawCircle(cx + pupilOffsetX, cy + pupilOffsetY, PUPIL_RADIUS, 40);
+}
 
 /**************************************2026*S2****************************************/

@@ -1,9 +1,9 @@
 {
   "Version": 1,
-  "WorkspaceRootPath": "C:\\ComputerGraphics\\source\\repos\\2DSnowscene\\",
+  "WorkspaceRootPath": "C:\\Users\\aria\\OneDrive\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\2DSnowscene\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{130BA375-B0EE-4B00-AD22-1DB886995DEE}|2DSnowscene.vcxproj|C:\\ComputerGraphics\\source\\repos\\2DSnowscene\\sourceFile.c||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "AbsoluteMoniker": "D:0:0:{130BA375-B0EE-4B00-AD22-1DB886995DEE}|2DSnowscene.vcxproj|C:\\Users\\aria\\OneDrive\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\2DSnowscene\\sourceFile.c||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
       "RelativeMoniker": "D:0:0:{130BA375-B0EE-4B00-AD22-1DB886995DEE}|2DSnowscene.vcxproj|solutionrelative:sourceFile.c||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
     }
   ],
@@ -24,11 +24,11 @@
               "$type": "Document",
               "DocumentIndex": 0,
               "Title": "sourceFile.c",
-              "DocumentMoniker": "C:\\ComputerGraphics\\source\\repos\\2DSnowscene\\sourceFile.c",
+              "DocumentMoniker": "C:\\Users\\aria\\OneDrive\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\2DSnowscene\\sourceFile.c",
               "RelativeDocumentMoniker": "sourceFile.c",
-              "ToolTip": "C:\\ComputerGraphics\\source\\repos\\2DSnowscene\\sourceFile.c",
+              "ToolTip": "C:\\Users\\aria\\OneDrive\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\2DSnowscene\\sourceFile.c",
               "RelativeToolTip": "sourceFile.c",
-              "ViewState": "AgIAABsAAAAAAAAAAAAAADUAAAAeAAAAAAAAAA==",
+              "ViewState": "AgIAAGMAAAAAAAAAAAAAAKIAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000423|",
               "WhenOpened": "2026-08-04T03:52:08.505Z",
               "EditorCaption": ""
