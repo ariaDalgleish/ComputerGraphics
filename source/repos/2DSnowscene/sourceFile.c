@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <ctype.h> // for tolower()
 
  /******************************************************************************
   * Particles set up structs
@@ -37,16 +38,19 @@ typedef struct {
 
 static Particle_t particles[MAX_PARTICLES];
 
-#define GROUND_VERTS 5
+#define GROUND_VERTS 6
 typedef struct { float x, y; } Vec2;
 static Vec2 groundTop[GROUND_VERTS];
 
-
-
+#define GROUND_TOP_FRAC   0.25f   // ground top band as a fraction of window height
+#define GROUND_FADE_FRAC  0.125f  // where the color gradient starts fading (1/8)
 
 /******************************************************************************
   * Global Particle Variables
   ******************************************************************************/
+int snowOn = 0; // toggle snow 1 = on, 0 = off
+
+// Particle system parameters 
 float particleGravity = 0.0f;        // used in update_particles() negative = downward
 float particleInitVyScale = 0.20f;     // used in spawn_particle() controls initial downward speed
 float particleInitVxScale = 0.05f;     // used in spawn_particle() controls horizontal spread
@@ -60,11 +64,26 @@ int windowWidth = 800;
 
 static float groundJitter[GROUND_VERTS]; // 0..1
 
+// Snowman position and size (in pixels) 
 float snowmanX = 200.0f;     // fixed pixel x (tweak)
 float snowmanY = 300.0f;     // will be set in init()
 float snowmanBaseR = 60.0f;  // fixed radius
 float snowmanT = 0.25f;      // normalized horizontal position (0..1) on the ground silhouette
 
+// Mouse position in world coordinates (set by mouseMoved, used by think())
+float mouseWorldX = 400.0f;
+float mouseWorldY = 400.0f;
+
+// Eye geometry, as fractions of head radius (so they scale with the snowman)
+#define EYE_OFFSET_X       0.35f  // horizontal distance from head center
+#define EYE_OFFSET_Y       0.15f  // vertical offset above head center
+#define EYE_RADIUS_FRAC    0.16f  // white of the eye
+#define PUPIL_RADIUS_FRAC  0.06f
+#define PUPIL_MARGIN_FRAC  0.03f  // keeps pupil from touching the eye's edge
+
+// Current pupil offsets from their eye centers, updated once per frame in think()
+float leftPupilOffsetX = 0.0f, leftPupilOffsetY = 0.0f;
+float rightPupilOffsetX = 0.0f, rightPupilOffsetY = 0.0f;
 
 /******************************************************************************
  * Animation & Timing Setup
@@ -93,6 +112,7 @@ unsigned int frameStartTime = 0;
  // Note: USE ONLY LOWERCASE CHARACTERS HERE. The keyboard handler provided converts all
  // characters typed by the user to lowercase, so the SHIFT key is ignored.
 
+#define KEY_TOGGLE_SNOW 's' //Toggle snow on/off (s).
 #define KEY_EXIT 'q' //Exit key (q).
 
 int renderFillEnabled = 1;
@@ -106,12 +126,13 @@ void reshape(int width, int h);
 void keyPressed(unsigned char key, int x, int y);
 void idle(void);
 void mouseClicked(int button, int state, int x, int y);
+void mouseMoved(int x, int y);
 
 /******************************************************************************
  * Animation-Specific Function Prototypes (add your own here)
  ******************************************************************************/
 
-void main(int argc, char** argv);
+int main(int argc, char** argv); // changed to int main(int argc, char** argv) to match standard C signature
 void init(void);
 void think(void);
 
@@ -123,7 +144,7 @@ void particles_init(void);
 void spawn_particles(int count);
 void particles_update(float dt); // dt = delta time in seconds since last update
 void particles_draw(void);
-void particle_test_draw(void);
+//void particle_test_draw(void);
 void drawBackgroundGradient(void);
 
 void generate_ground(void);
@@ -131,13 +152,19 @@ void draw_ground(void);
 
 /* Snowman helpers */
 void drawFilledCircleLit(float cx, float cy, float radius, int segments, float lightDirX, float lightDirY);
+void drawCircleFlat(float cx, float cy, float radius, int segments);
+void getSnowmanEyeGeometry(float cx, float cy, float baseRadius,
+	float* headCenterX, float* headCenterY, float* headRadiusPx,
+	float* leftEyeX, float* rightEyeX, float* eyeY);
 void drawSnowman(float cx, float cy, float baseRadius);
 float getGroundHeightAtX(float x);
+
+
 /******************************************************************************
  * Entry Point (don't put anything except the main function here)
  ******************************************************************************/
 
-void main(int argc, char** argv)
+int main(int argc, char** argv)
 {
 	// Initialize the OpenGL window.
 	glutInit(&argc, argv);
@@ -157,12 +184,15 @@ void main(int argc, char** argv)
 	glutKeyboardFunc(keyPressed);
 	glutMouseFunc(mouseClicked);
 	glutIdleFunc(idle);
+	glutPassiveMotionFunc(mouseMoved);
 
 	// Record when we started rendering the very first frame (which should happen after we call glutMainLoop).
 	frameStartTime = (unsigned int)glutGet(GLUT_ELAPSED_TIME);
 
 	// Enter the main drawing loop (this will never return).
 	glutMainLoop();
+
+	return 0; // This line will never be reached, but is included to avoid compiler warnings.
 }
 
 /******************************************************************************
@@ -199,7 +229,6 @@ void display(void)
 	glEnable(GL_DEPTH_TEST);
 
 	/* then draw particles (they'll all be in front for now) */
-	particle_test_draw();
 	particles_draw();
 
 	glutSwapBuffers();
@@ -209,7 +238,9 @@ void display(void)
 	Called when the OpenGL window has been resized.
 */
 void rebuild_ground_positions(void) {
-	float topBase = windowHeight / 4.0f, amp = topBase * 0.30f;
+	// rebuild_ground_positions
+	float topBase = windowHeight * GROUND_TOP_FRAC, amp = topBase * 0.30f;
+	//float topBase = windowHeight / 4.0f, amp = topBase * 0.30f;
 	for (int i = 0; i < GROUND_VERTS; i++) {
 		float t = (float)i / (GROUND_VERTS - 1);
 		groundTop[i].x = t * windowWidth;
@@ -246,20 +277,20 @@ void reshape(int width, int h)
 */
 void keyPressed(unsigned char key, int x, int y)
 {
-	switch (tolower(key)) {
-		/*
-			TEMPLATE: Add any new character key controls here.
+	int sceneChanged = 0; // flag to indicate if the scene needs to be redrawn
 
-			Rather than using literals (e.g. "d" for diagnostics), create a new KEY_
-			definition in the "Keyboard Input Handling Setup" section of this file.
-		*/
-	case 'l':
-		renderFillEnabled = !renderFillEnabled;
+	switch (tolower(key)) {
+	case KEY_TOGGLE_SNOW:
+		snowOn = !snowOn;
+		sceneChanged = 1;
 		break;
+	
 	case KEY_EXIT:
 		exit(0);
 		break;
 	}
+
+	if (sceneChanged) glutPostRedisplay(); // request a redraw of the scene
 }
 
 // Called when a mouse button is pressed. Left click places the snowman on the ground.
@@ -276,6 +307,14 @@ void mouseClicked(int button, int state, int x, int y)
 		snowmanY = groundY - (snowmanBaseR * 0.5f);
 		if (snowmanY < snowmanBaseR) snowmanY = snowmanBaseR;
 	}
+}
+
+void mouseMoved(int x, int y)
+{
+	// GLUT reports (0,0) at top-left with y increasing downward;
+	// flip to match our bottom-left-origin world coordinates.
+	mouseWorldX = (float)x;
+	mouseWorldY = (float)(windowHeight - y);
 }
 
 /*
@@ -320,11 +359,8 @@ void init(void)
 	/* Basic GL setup for point rendering and random seed */
 	glPointSize(1.0f);
 	glEnable(GL_POINT_SMOOTH);
-	// GL_POINT_SMOOTH_HINT is a hint to OpenGL about the quality of point smoothing.
-	// GL_NICEST indicates that we want the highest quality smoothing,
-	// which may be slower but will produce better visual results.
 	glHint(GL_POINT_SMOOTH_HINT, GL_NICEST);
-	// enables lighting calculations for 3D objects.
+	// Disable lighting calculations since we're not using OpenGL's lighting model for this scene.
 	glDisable(GL_LIGHTING);
 
 	// Seed the random number generator for particle randomness.
@@ -334,7 +370,7 @@ void init(void)
 	/* Choose a normalized horizontal position for the snowman so it stays
 	   attached to the ground if the window is resized. 0.0 = left, 1.0 = right. */
 	snowmanT = 0.25f; // 25% across the screen; tweak as desired
-	snowmanBaseR = 60.0f;
+	snowmanBaseR = 80.0f;
 	/* compute pixel X/Y from normalized position and embedding into ground */
 	snowmanX = snowmanT * windowWidth;
 	{
@@ -401,21 +437,61 @@ void think(void)
 	//spawn_particles(6);
 	/* Update particle dynamics using fixed timestep in seconds */
 	//particles_update(FRAME_TIME_SEC);
-
-	spawnAccumulator += spawnRate * FRAME_TIME_SEC;          // accumulate fractional particles
-	int toSpawn = (int)spawnAccumulator;
-	if (toSpawn > 0) {
-		spawn_particles(toSpawn);
-		spawnAccumulator -= toSpawn;
-
-
+	if (snowOn) {
+		spawnAccumulator += spawnRate * FRAME_TIME_SEC;
+		int toSpawn = (int)spawnAccumulator;
+		if (toSpawn > 0) {
+			spawn_particles(toSpawn);
+			spawnAccumulator -= toSpawn;
+		}
+		spawnRate += spawnGrowthPerSec * FRAME_TIME_SEC;
+		if (spawnRate > spawnRateMax) spawnRate = spawnRateMax;
 	}
-	/* subtle growth */
 
-	spawnRate += spawnGrowthPerSec * FRAME_TIME_SEC;
-	if (spawnRate > spawnRateMax) spawnRate = spawnRateMax;
 	particles_update(FRAME_TIME_SEC);
+
+	/* Update snowman eye pupils to track the mouse */
+	/*
+	Points each pupil towards the mouse, clamping the offset so it never
+	leaves the eye.
+*/
+	{
+		float headCenterX = 0.0f, headCenterY = 0.0f, headRadiusPx = 0.0f;
+		float leftEyeX = 0.0f, rightEyeX = 0.0f, eyeY = 0.0f;
+		getSnowmanEyeGeometry(snowmanX, snowmanY, snowmanBaseR,
+			&headCenterX, &headCenterY, &headRadiusPx,
+			&leftEyeX, &rightEyeX, &eyeY);
+
+		float eyeRadiusPx = EYE_RADIUS_FRAC * headRadiusPx;
+		float pupilRadiusPx = PUPIL_RADIUS_FRAC * headRadiusPx;
+		float pupilMarginPx = PUPIL_MARGIN_FRAC * headRadiusPx;
+		float maxPupilOffset = eyeRadiusPx - pupilRadiusPx - pupilMarginPx;
+		if (maxPupilOffset < 0.0f) maxPupilOffset = 0.0f;
+
+		float dx, dy, dist;
+
+		dx = mouseWorldX - leftEyeX;
+		dy = mouseWorldY - eyeY;
+		dist = sqrtf(dx * dx + dy * dy);
+		if (dist > maxPupilOffset && dist > 0.0f) {
+			dx = dx / dist * maxPupilOffset;
+			dy = dy / dist * maxPupilOffset;
+		}
+		leftPupilOffsetX = dx;
+		leftPupilOffsetY = dy;
+
+		dx = mouseWorldX - rightEyeX;
+		dy = mouseWorldY - eyeY;
+		dist = sqrtf(dx * dx + dy * dy);
+		if (dist > maxPupilOffset && dist > 0.0f) {
+			dx = dx / dist * maxPupilOffset;
+			dy = dy / dist * maxPupilOffset;
+		}
+		rightPupilOffsetX = dx;
+		rightPupilOffsetY = dy;
+	}
 }
+
 void drawBackgroundGradient(void)
 {
 	/* Draw a full-screen quad with interpolated colors (top->bottom gradient).
@@ -471,8 +547,11 @@ void draw_ground(void)
 		// bottom vertex (opaque)
 		glColor4f(bottomR, bottomG, bottomB, baseAlpha);
 		glVertex2f(x, 0.0f);
+		
+		// draw_ground
+		float t = (y - (windowHeight * GROUND_FADE_FRAC)) / (windowHeight * GROUND_TOP_FRAC);
 		// compute normalized t (0 at lowest possible top, 1 at highest top baseline)
-		float t = (y - (windowHeight / 8.0f)) / (windowHeight / 4.0f);
+		//float t = (y - (windowHeight / 8.0f)) / (windowHeight / 4.0f);
 		if (t < 0.0f) t = 0.0f; if (t > 1.0f) t = 1.0f;
 		float r = bottomR + (topR - bottomR) * t;
 		float g = bottomG + (topG - bottomG) * t;
@@ -518,35 +597,152 @@ void drawFilledCircleLit(float cx, float cy, float radius, int segments, float l
 	glEnd();
 }
 
-// Draw a 3-ball snowman. (cx,cy) = center of bottom (base) circle; baseRadius scales whole snowman.
+void drawCircleFlat(float cx, float cy, float radius, int segments)
+{
+	glBegin(GL_TRIANGLE_FAN);
+	glVertex2f(cx, cy);
+	for (int i = 0; i <= segments; ++i) {
+		float angle = 2.0f * 3.14159265359f * (float)i / (float)segments;
+		glVertex2f(cx + cosf(angle) * radius, cy + sinf(angle) * radius);
+	}
+	glEnd();
+}
+
+/* Computes head center/radius and eye centers for the snowman at its current
+   position and size. Shared by think() (pupil tracking) and drawSnowman()
+   (drawing), so the geometry only lives in one place. */
+void getSnowmanEyeGeometry(float cx, float cy, float baseRadius,
+	float* headCenterX, float* headCenterY, float* headRadiusPx,
+	float* leftEyeX, float* rightEyeX, float* eyeY)
+{
+	float overlapMiddle = 0.70f;
+	float overlapHead = 0.30f;
+
+	float baseRadiusPx = baseRadius;
+	float middleRadiusPx = baseRadius * 0.82f;
+	float hRadiusPx = baseRadius * 0.62f;
+
+	float middleCenterY = cy + baseRadiusPx + middleRadiusPx - overlapMiddle * middleRadiusPx;
+	float hCenterY = middleCenterY + middleRadiusPx + hRadiusPx - overlapHead * hRadiusPx;
+
+	*headCenterX = cx;
+	*headCenterY = hCenterY;
+	*headRadiusPx = hRadiusPx;
+	*leftEyeX = cx - EYE_OFFSET_X * hRadiusPx;
+	*rightEyeX = cx + EYE_OFFSET_X * hRadiusPx;
+	*eyeY = hCenterY + EYE_OFFSET_Y * hRadiusPx;
+}
+
 void drawSnowman(float cx, float cy, float baseRadius)
 {
 	// overlap: 0.0 = just touching, 0.5 = 50% overlap
-	float overlapMiddle = 0.45f; // tune 0.15..0.40
-	float overlapHead = 0.15f; // generally larger overlap for smaller head
+	float overlapMiddle = 0.70f; // how much the middle ball sinks into the base ball
+	float overlapHead = 0.30f; // how much the head sinks into the middle ball
 
 	// relative radii (tweak ratios as you like)
-	float r1 = baseRadius;           // base
-	float r2 = baseRadius * 0.82f;   // middle
-	float r3 = baseRadius * 0.62f;   // head
+	float baseRadiusPx = baseRadius;         // base ball
+	float middleRadiusPx = baseRadius * 0.82f; // middle ball
+	float headRadiusPx = baseRadius * 0.62f; // head ball
 
-	float c1x = cx, c1y = cy;
-	float c2x = cx;
-	float c2y = c1y + r1 + r2 - overlapMiddle * r2;
-	float c3x = cx;
-	float c3y = c2y + r2 + r3 - overlapHead * r3;
+	// center position of each ball, built bottom-up
+	float baseCenterX = cx, baseCenterY = cy;
+
+	float middleCenterX = cx;
+	float middleCenterY = baseCenterY + baseRadiusPx + middleRadiusPx - overlapMiddle * middleRadiusPx;
+
+	float headCenterX = cx;
+	float headCenterY = middleCenterY + middleRadiusPx + headRadiusPx - overlapHead * headRadiusPx;
 
 	// light direction (from top-left)
-	float lx = -0.5f, ly = 0.8f;
+	float lightDirX = -0.5f, lightDirY = 0.8f;
 
 	// draw balls: largest first (back-to-front)
-	drawFilledCircleLit(c1x, c1y, r1, 48, lx, ly);
-	drawFilledCircleLit(c2x, c2y, r2, 40, lx, ly);
-	drawFilledCircleLit(c3x, c3y, r3, 36, lx, ly);
+	drawFilledCircleLit(baseCenterX, baseCenterY, baseRadiusPx, 48, lightDirX, lightDirY);
+	drawFilledCircleLit(middleCenterX, middleCenterY, middleRadiusPx, 40, lightDirX, lightDirY);
+	drawFilledCircleLit(headCenterX, headCenterY, headRadiusPx, 36, lightDirX, lightDirY);
 
-	// optional: add simple eyes/nose/buttons with small filled circles/triangles
-	// e.g., glColor3f(0,0,0); draw small points for eyes on the head, etc.
+	/* --- Face: eyes and nose, positioned relative to head center and head radius --- */
+
+	// Tweak these to taste — all expressed as fractions of headRadiusPx so they scale with the snowman.
+	
+
+	float noseOffsetY = -0.1f;   // vertical position on the head, as fraction of head radius (+ up, - down, 0 = centered)
+	float noseLength = 0.55f; // how far the nose pokes out to the right, as fraction of head radius
+	float noseHalfWidth = 0.14f; // half-width of nose base, as fraction of head radius
+
+	glDisable(GL_DEPTH_TEST);
+
+	/* Following Eyes*/
+	{
+		// Px means "pixels" — these are computed from the head radius in pixels, so they scale with the snowman size.
+		float leftEyeX = headCenterX - EYE_OFFSET_X * headRadiusPx;
+		float rightEyeX = headCenterX + EYE_OFFSET_X * headRadiusPx;
+		float eyeY = headCenterY + EYE_OFFSET_Y * headRadiusPx;
+		float eyeRadiusPx = EYE_RADIUS_FRAC * headRadiusPx;
+		float pupilRadiusPx = PUPIL_RADIUS_FRAC * headRadiusPx;
+		float eyeOutlineRadiusPx = eyeRadiusPx * 1.15f; // slightly bigger than the white, acts as an outline
+
+		// Grey circle drawn first, slightly larger — its edge peeks out from behind the white to form an outline
+		glColor3f(0.6f, 0.6f, 0.6f);
+		drawCircleFlat(leftEyeX, eyeY, eyeOutlineRadiusPx, 24);
+		drawCircleFlat(rightEyeX, eyeY, eyeOutlineRadiusPx, 24);
+
+		glColor3f(1.0f, 1.0f, 1.0f); // white of the eyes
+		drawCircleFlat(leftEyeX, eyeY, eyeRadiusPx, 24);
+		drawCircleFlat(rightEyeX, eyeY, eyeRadiusPx, 24);
+
+		glColor3f(0.05f, 0.05f, 0.05f); // dark pupils
+		drawCircleFlat(leftEyeX + leftPupilOffsetX, eyeY + leftPupilOffsetY, pupilRadiusPx, 20);
+		drawCircleFlat(rightEyeX + rightPupilOffsetX, eyeY + rightPupilOffsetY, pupilRadiusPx, 20);
+	}
+
+	/* Nose: single orange triangle pointing right, out from the edge of the head */
+	glColor3f(1.0f, 0.55f, 0.1f);
+
+	float noseBaseX = headCenterX;
+	float noseY = headCenterY + noseOffsetY * headRadiusPx; // only Y is adjustable — X stays locked to the head edge
+	float noseHalfWidthPx = noseHalfWidth * headRadiusPx;
+	float noseLengthPx = noseLength * headRadiusPx;
+
+	glBegin(GL_TRIANGLES);
+	// Base is vertical (spread along Y at the head's edge), tip pokes out to the right
+	glVertex2f(noseBaseX, noseY - noseHalfWidthPx); // base-top
+	glVertex2f(noseBaseX, noseY + noseHalfWidthPx); // base-bottom
+	glVertex2f(noseBaseX + noseLengthPx, noseY);    // tip — pokes out to the right
+	glEnd();
+
+	glEnable(GL_DEPTH_TEST);
+
+	/* --- Snowman body buttons, one centered on middle ball and one centered on base ball --- */
+
+	float topmiddleButtonSize = 0.10f; // as fraction of middle ball radius
+	float botmiddleButtonSize = 0.10f; // as fraction of middle ball radius
+	float baseButtonSize = 0.10f; // as fraction of base ball radius
+
+	glColor3f(0.0f, 0.0f, 0.0f); // buttons are solid black
+
+	float topmiddleButtonDiameterPx = topmiddleButtonSize * middleRadiusPx * 2.0f; // glPointSize is a diameter, not a radius
+	float botmiddleButtonDiameterPx = botmiddleButtonSize * middleRadiusPx * 2.5f;
+	float baseButtonDiameterPx = baseButtonSize * baseRadiusPx * 4.0f; // This value changes the size of the top button on the base ball
+
+	glPointSize(topmiddleButtonDiameterPx);
+	glBegin(GL_POINTS);
+	glVertex2f(middleCenterX, middleCenterY + 15.0f);
+	glEnd();
+
+	glPointSize(botmiddleButtonDiameterPx);
+	glBegin(GL_POINTS);
+	glVertex2f(middleCenterX, middleCenterY - 15.0f);
+	glEnd();
+
+	glPointSize(baseButtonDiameterPx);
+	glBegin(GL_POINTS);
+	glVertex2f(baseCenterX, baseCenterY);
+	glEnd();
+
 }
+
+
 /* Sample ground height at a given screen X. Linearly interpolates between top vertices. */
 float getGroundHeightAtX(float x)
 {
@@ -648,17 +844,17 @@ void particles_draw(void)
 	glDisable(GL_BLEND);
 }
 
-/* Test draw: create a known particle and draw as a point primitive. Called from display() */
-void particle_test_draw(void)
-{
-	/* Known position in clip-space */
-	float tx = 0.0f;
-	float ty = 0.0f;
-	glColor3f(1.0f, 1.0f, 1.0f);
-	glPointSize(8.0f);
-	glBegin(GL_POINTS);
-	glVertex2f(tx, ty);
-	glEnd();
-}
+///* Test draw: create a known particle and draw as a point primitive. Called from display() */
+//void particle_test_draw(void)
+//{
+//	/* Known position in clip-space */
+//	float tx = 0.0f;
+//	float ty = 0.0f;
+//	glColor3f(1.0f, 1.0f, 1.0f);
+//	glPointSize(8.0f);
+//	glBegin(GL_POINTS);
+//	glVertex2f(tx, ty);
+//	glEnd();
+//}
 
 /**************************************2026*S2****************************************/
