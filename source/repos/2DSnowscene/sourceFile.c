@@ -34,17 +34,21 @@ typedef struct {
 
 } Particle_t;
 
-#define MAX_PARTICLES 1000
-
-static Particle_t particles[MAX_PARTICLES];
-
+#define GROUND_TOP_FRAC   0.25f   // ground top band as a fraction of window height
+#define GROUND_FADE_FRAC  0.125f  // where the color gradient starts fading (1/8)
 #define GROUND_VERTS 6
 typedef struct { float x, y; } Vec2;
 static Vec2 groundTop[GROUND_VERTS];
 
-#define GROUND_TOP_FRAC   0.25f   // ground top band as a fraction of window height
-#define GROUND_FADE_FRAC  0.125f  // where the color gradient starts fading (1/8)
+/* ----- original particle system (foreground snow) ----- */
+#define MAX_PARTICLES 1000
+static Particle_t particles[MAX_PARTICLES];
+int activeParticleCount = 0;          /* used by diagnostics */
 
+/* ----- background snow ------------------------------------------------- */
+#define MAX_BACK_PARTICLES 800        /* you can tune this */
+static Particle_t backParticles[MAX_BACK_PARTICLES];
+int activeBackCount = 0;              /* optional – for diagnostics */
 /******************************************************************************
   * Global Particle Variables
   ******************************************************************************/
@@ -57,12 +61,25 @@ float particleInitVxScale = 0.05f;     // used in spawn_particle() controls hori
 float spawnRate = 10.0f;           // particles/sec (start)
 float spawnAccumulator = 0.0f;	// used to track time between spawns
 float spawnGrowthPerSec = 0.5f;  // particles/sec^2 (increase spawn rate over time)
-float spawnRateMax = 12.0f;       // cap
+float spawnRateMax = 20.0f;       // cap
 
+// Window Dimensions
 int windowHeight = 800;
 int windowWidth = 800;
 
+// Ground Data
 static float groundJitter[GROUND_VERTS]; // 0..1
+
+//Diagnostics
+int showDiagnostics = 1; // toggle
+static const char* diagnosticsLines[] = {
+    "Controls:",
+    "'s' - Toggle snow",
+    "'d' - Toggle diagnostics",
+    "'q' - Exit application",
+    "Left Click - Move snowman"
+};
+#define NUM_DIAGNOSTIC_LINES (sizeof(diagnosticsLines)/sizeof(diagnosticsLines[0]))
 
 // Snowman position and size (in pixels) 
 float snowmanX = 200.0f;     // fixed pixel x (tweak)
@@ -114,6 +131,7 @@ unsigned int frameStartTime = 0;
 
 #define KEY_TOGGLE_SNOW 's' //Toggle snow on/off (s).
 #define KEY_EXIT 'q' //Exit key (q).
+#define KEY_TOGGLE_DIAGNOSTICS 'd' //Toggle diagnostic text on/off (d).
 
 int renderFillEnabled = 1;
 
@@ -146,6 +164,7 @@ void particles_update(float dt); // dt = delta time in seconds since last update
 void particles_draw(void);
 //void particle_test_draw(void);
 void drawBackgroundGradient(void);
+void drawDiagnostics(void);
 
 void generate_ground(void);
 void draw_ground(void);
@@ -231,6 +250,8 @@ void display(void)
 	/* then draw particles (they'll all be in front for now) */
 	particles_draw();
 
+	drawDiagnostics();
+
 	glutSwapBuffers();
 }
 
@@ -285,6 +306,11 @@ void keyPressed(unsigned char key, int x, int y)
 		sceneChanged = 1;
 		break;
 	
+	case KEY_TOGGLE_DIAGNOSTICS:
+		showDiagnostics = !showDiagnostics;
+		sceneChanged = 1;
+		break;
+
 	case KEY_EXIT:
 		exit(0);
 		break;
@@ -680,7 +706,7 @@ void drawSnowman(float cx, float cy, float baseRadius)
 		float eyeY = headCenterY + EYE_OFFSET_Y * headRadiusPx;
 		float eyeRadiusPx = EYE_RADIUS_FRAC * headRadiusPx;
 		float pupilRadiusPx = PUPIL_RADIUS_FRAC * headRadiusPx;
-		float eyeOutlineRadiusPx = eyeRadiusPx * 1.15f; // slightly bigger than the white, acts as an outline
+		float eyeOutlineRadiusPx = eyeRadiusPx * 1.15f; // slightly bigger than the white, acts as an outlineExa
 
 		// Grey circle drawn first, slightly larger — its edge peeks out from behind the white to form an outline
 		glColor3f(0.6f, 0.6f, 0.6f);
@@ -828,10 +854,12 @@ void particles_update(float dt)
 /* Draw all active particles as GL_POINTS */
 void particles_draw(void)
 {
+	activeParticleCount = 0; // reset counter
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	for (int i = 0; i < MAX_PARTICLES; ++i) {
 		if (!particles[i].active) continue;
+		activeParticleCount++; // COUNT ACTIVE PARTICLES
 		/* size and color vary with age */
 		float t = particles[i].age / particles[i].lifetime;
 		float alpha = 0.8f - t;
@@ -845,6 +873,47 @@ void particles_draw(void)
 }
 
 ///* Test draw: create a known particle and draw as a point primitive. Called from display() */
+/* Draw diagnostics information in top-left corner */
+void drawDiagnostics(void)
+{
+	if (!showDiagnostics) return;
+
+	// Save current state
+	GLboolean depthTestEnabled = glIsEnabled(GL_DEPTH_TEST);
+	glDisable(GL_DEPTH_TEST);
+
+	// Set white color
+	glColor3f(1.0f, 1.0f, 1.0f);
+
+	// Set raster position for top-left (adjust y for font baseline)
+	int startX = 10;
+	int startY = windowHeight - 20;
+	int lineHeight = 20;
+
+	// Draw control lines
+	for (int i = 0; i < NUM_DIAGNOSTIC_LINES; i++) {
+		const char* line = diagnosticsLines[i];
+		glRasterPos2i(startX, startY - i * lineHeight);
+		while (*line) {
+			glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, *line);
+			line++;
+		}
+	}
+
+	// Draw particle count
+	char particleStr[32];
+	sprintf_s(particleStr, sizeof(particleStr), "%3d/%4d active", activeParticleCount, MAX_PARTICLES);
+	glRasterPos2i(startX, startY - NUM_DIAGNOSTIC_LINES * lineHeight);
+	const char* p = particleStr;
+	while (*p) {
+		glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, *p);
+		p++;
+	}
+
+	// Restore state
+	if (depthTestEnabled) glEnable(GL_DEPTH_TEST);
+}
+
 //void particle_test_draw(void)
 //{
 //	/* Known position in clip-space */
