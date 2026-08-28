@@ -1,0 +1,1110 @@
+/******************************************************************************
+ *
+ * Animation v2.0 (15/07/2026)
+ *
+ * This template provides a basic FPS-limited render loop for an animated scene.
+ *
+ ******************************************************************************/
+
+#include <Windows.h>
+#include <freeglut.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <ctype.h> // for tolower()
+
+ /******************************************************************************
+  * Particles set up structs
+  ******************************************************************************/
+  // purpose of this struct is to hold the position of a particle in 3D space (x, y, and z coordinates)
+typedef struct {
+	float x;
+	float y;
+	float z;
+} Position3;
+
+// purpose of this struct is to hold the properties of a particle, including its position, size, velocity, age, lifetime, and active status
+typedef struct {
+	Position3 position; // x y z location of particle
+	float size;
+	float vx, vy, vz;
+	float age;       // seconds alive
+	float lifetime;  // seconds to live
+	int active; // 0 = inactive
+
+} Particle_t;
+
+#define GROUND_TOP_FRAC   0.25f   // ground top band as a fraction of window height
+#define GROUND_FADE_FRAC  0.125f  // where the color gradient starts fading (1/8)
+#define GROUND_VERTS 6
+typedef struct { float x, y, z; } Vec3;
+static Vec3 groundTop[GROUND_VERTS];
+
+/* ----- original particle system (foreground snow) ----- */
+#define MAX_PARTICLES 1000
+static Particle_t particles[MAX_PARTICLES];
+int activeParticleCount = 0;          /* used by diagnostics */
+
+/* ----- background snow ------------------------------------------------- */
+#define MAX_BACK_PARTICLES 800        /* you can tune this */
+static Particle_t backParticles[MAX_BACK_PARTICLES];
+int activeBackCount = 0;              /* optional – for diagnostics */
+/******************************************************************************
+  * Global Particle Variables
+  ******************************************************************************/
+int snowOn = 0; // toggle snow 1 = on, 0 = off
+
+// Particle system parameters 
+float particleGravity = 0.0f;        // used qin update_particles() negative = downward
+float particleInitVyScale = 0.20f;     // used in spawn_particle() controls initial downward speed
+float particleInitVxScale = 0.05f;     // used in spawn_particle() controls horizontal spread
+float spawnRate = 15.0f;           // particles/sec (start)
+float spawnAccumulator = 0.0f;	// used to track time between spawns
+float spawnGrowthPerSec = 0.5f;  // particles/sec^2 (increase spawn rate over time)
+float spawnRateMax = 30.0f;       // cap
+float backSpawnRate = 2.0f;           // background particles/sec (start)
+float backSpawnAccumulator = 0.0f;
+float backSpawnGrowthPerSec = 0.1f;  // slow increase
+float backSpawnRateMax = 5.0f;       // cap
+
+// Window Dimensions
+int windowHeight = 800;
+int windowWidth = 800;
+
+// Ground Data
+static float groundJitter[GROUND_VERTS]; // 0..1
+
+//Diagnostics
+int showDiagnostics = 1; // toggle
+static const char* diagnosticsLines[] = {
+    "Controls:",
+    "'s' - Toggle snow",
+    "'d' - Toggle diagnostics",
+    "'q' - Exit application",
+    "Left Click - Move snowman"
+};
+#define NUM_DIAGNOSTIC_LINES (sizeof(diagnosticsLines)/sizeof(diagnosticsLines[0]))
+
+// Snowman position and size (in pixels) 
+float snowmanX = 200.0f;     // fixed pixel x (tweak)
+float snowmanY = 300.0f;     // will be set in init()
+float snowmanBaseR = 60.0f;  // fixed radius
+float snowmanT = 0.25f;      // normalized horizontal position (0..1) on the ground silhouette
+
+// Mouse position in world coordinates (set by mouseMoved, used by think())
+float mouseWorldX = 400.0f;
+float mouseWorldY = 400.0f;
+
+/* ----- Breath puff system ----- */
+#define MAX_BREATH 20
+typedef struct {
+	float x, y;          /* world position */
+	float vx, vy;        /* velocity */
+	float age;
+	float lifetime;
+	float radius;        /* visual radius */
+	float alpha;         /* transparency */
+	int active;
+} BreathParticle;
+
+static BreathParticle breathParticles[MAX_BREATH];
+
+// Breath puff timer (seconds)
+static float breathTimer = 0.0f;
+static float breathInterval = 0.0f;   // seconds between puffs (randomized)
+const float BREATH_SPEED  = 50.0f;   // initial outward speed (px/s)
+const float BREATH_LIFE   = 1.6f;     // how long a puff lives
+
+// Eye geometry, as fractions of head radius (so they scale with the snowman)
+#define EYE_OFFSET_X       0.35f  // horizontal distance from head center
+#define EYE_OFFSET_Y       0.15f  // vertical offset above head center
+#define EYE_RADIUS_FRAC    0.16f  // white of the eye
+#define PUPIL_RADIUS_FRAC  0.06f
+#define PUPIL_MARGIN_FRAC  0.03f  // keeps pupil from touching the eye's edge
+
+// Current pupil offsets from their eye centers, updated once per frame in think()
+float leftPupilOffsetX = 0.0f, leftPupilOffsetY = 0.0f;
+float rightPupilOffsetX = 0.0f, rightPupilOffsetY = 0.0f;
+
+/******************************************************************************
+ * Animation & Timing Setup
+ ******************************************************************************/
+
+ // Target frame rate (number of Frames Per Second).
+#define TARGET_FPS 60				
+
+// Ideal time each frame should be displayed for (in milliseconds).
+const unsigned int FRAME_TIME = 1000 / TARGET_FPS;
+
+// Frame time in fractional seconds.
+// Note: This is calculated to accurately reflect the truncated integer value of
+// FRAME_TIME, which is used for timing, rather than the more accurate fractional
+// value we'd get if we simply calculated "FRAME_TIME_SEC = 1.0f / TARGET_FPS".
+const float FRAME_TIME_SEC = (1000 / TARGET_FPS) / 1000.0f;
+
+// Time we started preparing the current frame (in milliseconds since GLUT was initialized).
+unsigned int frameStartTime = 0;
+
+/******************************************************************************
+ * Keyboard Input Handling Setup
+ ******************************************************************************/
+
+ // Define all character keys used for input (add any new key definitions here).
+ // Note: USE ONLY LOWERCASE CHARACTERS HERE. The keyboard handler provided converts all
+ // characters typed by the user to lowercase, so the SHIFT key is ignored.
+
+#define KEY_TOGGLE_SNOW 's' //Toggle snow on/off (s).
+#define KEY_EXIT 'q' //Exit key (q).
+#define KEY_TOGGLE_DIAGNOSTICS 'd' //Toggle diagnostic text on/off (d).
+
+int renderFillEnabled = 1;
+
+/******************************************************************************
+ * GLUT Callback Prototypes
+ ******************************************************************************/
+
+void display(void);
+void reshape(int width, int h);
+void keyPressed(unsigned char key, int x, int y);
+void idle(void);
+void mouseClicked(int button, int state, int x, int y);
+void mouseMoved(int x, int y);
+
+/******************************************************************************
+ * Animation-Specific Function Prototypes (add your own here)
+ ******************************************************************************/
+
+int main(int argc, char** argv); // changed to int main(int argc, char** argv) to match standard C signature
+void init(void);
+void think(void);
+
+/******************************************************************************
+ * Animation-Specific Setup (Add your own definitions, constants, and globals here)
+ ******************************************************************************/
+
+void particles_init(void);
+void spawn_particles(int count);
+void spawn_background_particles(int count);
+void particles_update(float dt);
+void update_background_particles(float dt);
+void particles_draw(void);
+void draw_background_particles(void);
+//void particle_test_draw(void);
+void drawBackgroundGradient(void);
+void drawDiagnostics(void);
+void drawBreathPuffs(void);
+void updateBreathParticles(float dt);
+void spawnBreathPuff(void);
+void applyBreathToSnow(float dt);
+
+void generate_ground(void);
+void draw_ground(void);
+
+/* Snowman helpers */
+void drawFilledCircleLit(float cx, float cy, float radius, int segments, float lightDirX, float lightDirY);
+void drawCircleFlat(float cx, float cy, float radius, int segments);
+void getSnowmanEyeGeometry(float cx, float cy, float baseRadius,
+	float* headCenterX, float* headCenterY, float* headRadiusPx,
+	float* leftEyeX, float* rightEyeX, float* eyeY);
+void drawSnowman(float cx, float cy, float baseRadius);
+float getGroundHeightAtX(float x);
+
+
+/******************************************************************************
+ * Entry Point (don't put anything except the main function here)
+ ******************************************************************************/
+
+int main(int argc, char** argv)
+{
+	// Initialize the OpenGL window.
+	glutInit(&argc, argv);
+	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
+	glutInitWindowSize(800, 800);
+	glutCreateWindow("Animation");
+
+	// Set up the scene.
+	init();
+
+	// Disable key repeat (keyPressed or specialKeyPressed will only be called once when a key is first pressed).
+	glutSetKeyRepeat(GLUT_KEY_REPEAT_OFF);
+
+	// Register GLUT callbacks.
+	glutDisplayFunc(display);
+	glutReshapeFunc(reshape);
+	glutKeyboardFunc(keyPressed);
+	glutMouseFunc(mouseClicked);
+	glutIdleFunc(idle);
+	glutPassiveMotionFunc(mouseMoved);
+
+	// Record when we started rendering the very first frame (which should happen after we call glutMainLoop).
+	frameStartTime = (unsigned int)glutGet(GLUT_ELAPSED_TIME);
+
+	// Enter the main drawing loop (this will never return).
+	glutMainLoop();
+
+	return 0; // This line will never be reached, but is included to avoid compiler warnings.
+}
+
+/******************************************************************************
+ * GLUT Callbacks (don't add any other functions here)
+ ******************************************************************************/
+
+ /*
+	  Called when GLUT wants us to (re)draw the current animation frame.
+
+	  Note: This function must not do anything to update the state of our simulated
+	  world. Animation (moving or rotating things, responding to keyboard input,
+	  etc.) should only be performed within the think() function provided below.
+  */
+void display(void)
+{
+	if (!renderFillEnabled)
+		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	else
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+	/* Drawing: clear, draw background, particles, and eyes */
+	//glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	drawBackgroundGradient();
+	draw_ground();
+
+	float avgGroundY = 0.0f;
+	for (int i = 0;i < GROUND_VERTS;i++) avgGroundY += groundTop[i].y;
+	avgGroundY /= GROUND_VERTS;
+/* Draw background snow */
+draw_background_particles();
+
+	glDisable(GL_DEPTH_TEST);
+	drawSnowman(snowmanX, snowmanY, snowmanBaseR);
+	glEnable(GL_DEPTH_TEST);
+
+	/* Draw breath puffs */
+	drawBreathPuffs();
+
+	/* then draw particles (they'll all be in front for now) */
+	particles_draw();
+
+	drawDiagnostics();
+
+	glutSwapBuffers();
+}
+
+/*
+	Called when the OpenGL window has been resized.
+*/
+void rebuild_ground_positions(void) {
+	// rebuild_ground_positions
+	float topBase = windowHeight * GROUND_TOP_FRAC, amp = topBase * 0.30f;
+	//float topBase = windowHeight / 4.0f, amp = topBase * 0.30f;
+	for (int i = 0; i < GROUND_VERTS; i++) {
+		float t = (float)i / (GROUND_VERTS - 1);
+		groundTop[i].x = t * windowWidth;
+		groundTop[i].y = topBase - groundJitter[i] * amp;
+	}
+	/* Keep snowman attached to the ground silhouette by using a normalized X (snowmanT)
+	   snowmanX is recomputed to match the current windowWidth, and snowmanY is set
+	   slightly below the top so the snowman appears 'in' the ground. */
+	snowmanX = snowmanT * windowWidth;
+	{
+		float groundY = getGroundHeightAtX(snowmanX);
+		/* embed half the base into the ground */
+		snowmanY = groundY - (snowmanBaseR * 0.5f);
+		/* clamp so snowman stays visible */
+		if (snowmanY < snowmanBaseR) snowmanY = snowmanBaseR;
+		if (snowmanY + snowmanBaseR * 3.0f > windowHeight) snowmanY = windowHeight - snowmanBaseR * 3.0f;
+	}
+}
+
+void reshape(int width, int h)
+{
+	windowWidth = width;
+	windowHeight = h;
+	glViewport(0, 0, width, h);
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	gluOrtho2D(0.0, (float)width, 0.0, (float)h);
+	glMatrixMode(GL_MODELVIEW);
+	rebuild_ground_positions();
+}
+
+/*
+	Called each time a character key (e.g. a letter, number, or symbol) is pressed.
+*/
+void keyPressed(unsigned char key, int x, int y)
+{
+	int sceneChanged = 0; // flag to indicate if the scene needs to be redrawn
+
+	switch (tolower(key)) {
+	case KEY_TOGGLE_SNOW:
+		snowOn = !snowOn;
+		sceneChanged = 1;
+		break;
+	
+	case KEY_TOGGLE_DIAGNOSTICS:
+		showDiagnostics = !showDiagnostics;
+		sceneChanged = 1;
+		break;
+
+	case KEY_EXIT:
+		exit(0);
+		break;
+	}
+
+	if (sceneChanged) glutPostRedisplay(); // request a redraw of the scene
+}
+
+// Called when a mouse button is pressed. Left click places the snowman on the ground.
+void mouseClicked(int button, int state, int x, int y)
+{
+	if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
+		float sx = (float)x;
+		if (sx < 0.0f) sx = 0.0f; if (sx > (float)windowWidth) sx = (float)windowWidth;
+		// store normalized position so snowman stays attached when window resizes
+		snowmanT = sx / (float)windowWidth;
+		snowmanX = sx;
+		float groundY = getGroundHeightAtX(snowmanX);
+		// embed half the base into the ground
+		snowmanY = groundY - (snowmanBaseR * 0.5f);
+		if (snowmanY < snowmanBaseR) snowmanY = snowmanBaseR;
+	}
+}
+
+void mouseMoved(int x, int y)
+{
+	// GLUT reports (0,0) at top-left with y increasing downward;
+	// flip to match our bottom-left-origin world coordinates.
+	mouseWorldX = (float)x;
+	mouseWorldY = (float)(windowHeight - y);
+}
+
+/*
+Called by GLUT when it's not rendering a frame.
+
+Note: We use this to handle animation and timing. You shouldn't need to modify
+this callback at all. Instead, place your animation logic (e.g. moving or rotating
+things) within the think() method provided with this template.
+*/
+void idle(void)
+{
+	// Wait until it's time to render the next frame.
+
+	unsigned int frameTimeElapsed = (unsigned int)glutGet(GLUT_ELAPSED_TIME) - frameStartTime;
+	if (frameTimeElapsed < FRAME_TIME)
+	{
+		// This frame took less time to render than the ideal FRAME_TIME: we'll suspend this thread for the remaining time,
+		// so we're not taking up the CPU until we need to render another frame.
+		unsigned int timeLeft = FRAME_TIME - frameTimeElapsed;
+		Sleep(timeLeft);
+	}
+
+	// Begin processing the next frame.
+
+	frameStartTime = glutGet(GLUT_ELAPSED_TIME); // Record when we started work on the new frame.
+
+	think(); // Update our simulated world before the next call to display().
+
+	glutPostRedisplay(); // Tell OpenGL there's a new frame ready to be drawn.
+}
+
+/******************************************************************************
+ * Animation-Specific Functions (Add your own functions at the end of this section)
+ ******************************************************************************/
+
+ /*
+	 Initialise OpenGL and set up our scene before we begin the render loop.
+ */
+
+void init(void)
+{
+	/* Basic GL setup for point rendering and random seed */
+	glPointSize(1.0f);
+	glEnable(GL_POINT_SMOOTH);
+	glHint(GL_POINT_SMOOTH_HINT, GL_NICEST);
+	// Disable lighting calculations since we're not using OpenGL's lighting model for this scene.
+	glDisable(GL_LIGHTING);
+
+	// Seed the random number generator for particle randomness.
+	srand((unsigned int)time(NULL));
+
+	// Initialize random breath interval (2-5 seconds)
+	breathInterval = 2.0f + ((float)rand() / RAND_MAX) * 3.0f;
+
+	generate_ground();
+
+	/* Choose a normalized horizontal position for the snowman so it stays
+	   attached to the ground if the window is resized. 0.0 = left, 1.0 = right. */
+	snowmanT = 0.25f; // 25% across the screen; tweak as desired
+	snowmanBaseR = 80.0f;
+	/* compute pixel X/Y from normalized position and embedding into ground */
+	snowmanX = snowmanT * windowWidth;
+	{
+		float groundY = getGroundHeightAtX(snowmanX);
+		/* embed half the base into the ground */
+		snowmanY = groundY - (snowmanBaseR * 0.5f);
+		if (snowmanY < snowmanBaseR) snowmanY = snowmanBaseR;
+	}
+
+	particles_init(); // Initialize the particle system.
+}
+
+
+void think(void)
+{
+	//particles_update(FRAME_TIME_SEC);
+	if (snowOn) {
+		// Foreground snow
+		spawnAccumulator += spawnRate * FRAME_TIME_SEC;
+		int toSpawn = (int)spawnAccumulator;
+		if (toSpawn > 0) {
+			spawn_particles(toSpawn);
+			spawnAccumulator -= toSpawn;
+		}
+		spawnRate += spawnGrowthPerSec * FRAME_TIME_SEC;
+		if (spawnRate > spawnRateMax) spawnRate = spawnRateMax;
+
+		// Background snow
+		backSpawnAccumulator += backSpawnRate * FRAME_TIME_SEC;
+		int backToSpawn = (int)backSpawnAccumulator;
+		if (backToSpawn > 0) {
+			spawn_background_particles(backToSpawn);
+			backSpawnAccumulator -= backToSpawn;
+		}
+		backSpawnRate += backSpawnGrowthPerSec * FRAME_TIME_SEC;
+		if (backSpawnRate > backSpawnRateMax) backSpawnRate = backSpawnRateMax;
+	}
+
+	/* Update particle systems */
+	particles_update(FRAME_TIME_SEC);
+	update_background_particles(FRAME_TIME_SEC);
+
+	/* Breath puff system */
+	breathTimer += FRAME_TIME_SEC;
+	if (breathTimer >= breathInterval) {
+		spawnBreathPuff();
+		breathTimer = 0.0f;
+		// Set new random interval between 1 and 4 seconds
+		breathInterval = 1.0f + ((float)rand() / RAND_MAX) * 3.0f;
+	}
+	updateBreathParticles(FRAME_TIME_SEC);
+	applyBreathToSnow(FRAME_TIME_SEC);
+
+	/* Update snowman eye pupils to track the mouse */
+	/*
+	Points each pupil towards the mouse, clamping the offset so it never
+	leaves the eye. */
+	{
+		float headCenterX = 0.0f, headCenterY = 0.0f, headRadiusPx = 0.0f;
+		float leftEyeX = 0.0f, rightEyeX = 0.0f, eyeY = 0.0f;
+		getSnowmanEyeGeometry(snowmanX, snowmanY, snowmanBaseR,
+			&headCenterX, &headCenterY, &headRadiusPx,
+			&leftEyeX, &rightEyeX, &eyeY);
+
+		float eyeRadiusPx = EYE_RADIUS_FRAC * headRadiusPx;
+		float pupilRadiusPx = PUPIL_RADIUS_FRAC * headRadiusPx;
+		float pupilMarginPx = PUPIL_MARGIN_FRAC * headRadiusPx;
+		float maxPupilOffset = eyeRadiusPx - pupilRadiusPx - pupilMarginPx;
+		if (maxPupilOffset < 0.0f) maxPupilOffset = 0.0f;
+
+		float dx, dy, dist;
+
+		dx = mouseWorldX - leftEyeX;
+		dy = mouseWorldY - eyeY;
+		dist = sqrtf(dx * dx + dy * dy);
+		if (dist > maxPupilOffset && dist > 0.0f) {
+			dx = dx / dist * maxPupilOffset;
+			dy = dy / dist * maxPupilOffset;
+		}
+		leftPupilOffsetX = dx;
+		leftPupilOffsetY = dy;
+
+		dx = mouseWorldX - rightEyeX;
+		dy = mouseWorldY - eyeY;
+		dist = sqrtf(dx * dx + dy * dy);
+		if (dist > maxPupilOffset && dist > 0.0f) {
+			dx = dx / dist * maxPupilOffset;
+			dy = dy / dist * maxPupilOffset;
+		}
+		rightPupilOffsetX = dx;
+		rightPupilOffsetY = dy;
+	}
+}
+
+void drawBackgroundGradient(void)
+{
+	/* Draw a full-screen quad with interpolated colors (top->bottom gradient).
+	   Disable depth write/test so it doesn't occlude scene geometry. */
+	glDisable(GL_DEPTH_TEST);
+	glDepthMask(GL_FALSE);
+
+	/* Preserve and reset projection/modelview so quad covers clip-space [-1,1]. */
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix(); glLoadIdentity();
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix(); glLoadIdentity();
+
+	glBegin(GL_QUADS);
+	/* top (lighter) */
+	glColor3f(0.161f, 0.596f, 0.776f); glVertex2f(-1.0f, 1.0f);
+	glColor3f(0.161f, 0.596f, 0.776f); glVertex2f(1.0f, 1.0f);
+	/* bottom (darker) */
+	glColor3f(0.51f, 0.784f, 0.898f); glVertex2f(1.0f, -1.0f);
+	glColor3f(0.51f, 0.784f, 0.898f); glVertex2f(-1.0f, -1.0f);
+	glEnd();
+
+	/* restore matrices */
+	glPopMatrix(); /* MODELVIEW */
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+	glMatrixMode(GL_MODELVIEW);
+
+	/* restore depth state */
+	glDepthMask(GL_TRUE);
+	glEnable(GL_DEPTH_TEST);
+}
+
+void generate_ground(void) {
+	for (int i = 0;i < GROUND_VERTS;i++) groundJitter[i] = (float)rand() / RAND_MAX;
+	rebuild_ground_positions();
+}
+
+void draw_ground(void)
+{
+	const float topR = 1.0f, topG = 1.0f, topB = 1.0f;          // bright snow
+	const float bottomR = 0.85f, bottomG = 0.86f, bottomB = 0.88f; // base grey
+	const float baseAlpha = 1.0f;
+	const float topAlpha = 0.2f; // 0 = fully faded into background
+
+	glDisable(GL_DEPTH_TEST);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	glBegin(GL_TRIANGLE_STRIP);
+	for (int i = 0; i < GROUND_VERTS; ++i) {
+		float x = groundTop[i].x, y = groundTop[i].y;
+		// bottom vertex (opaque)
+		glColor4f(bottomR, bottomG, bottomB, baseAlpha);
+		glVertex2f(x, 0.0f);
+		
+		// draw_ground
+		float t = (y - (windowHeight * GROUND_FADE_FRAC)) / (windowHeight * GROUND_TOP_FRAC);
+		// compute normalized t (0 at lowest possible top, 1 at highest top baseline)
+		//float t = (y - (windowHeight / 8.0f)) / (windowHeight / 4.0f);
+		if (t < 0.0f) t = 0.0f; if (t > 1.0f) t = 1.0f;
+		float r = bottomR + (topR - bottomR) * t;
+		float g = bottomG + (topG - bottomG) * t;
+		float b = bottomB + (topB - bottomB) * t;
+		float a = baseAlpha + (topAlpha - baseAlpha) * t; // fades toward topAlpha
+		glColor4f(r, g, b, a);
+		glVertex2f(x, y);
+	}
+	glEnd();
+
+	glDisable(GL_BLEND);
+	glEnable(GL_DEPTH_TEST);
+}
+
+// draw a filled, lit circle using a triangle fan. lightDir gives lighting direction in 2D.
+void drawFilledCircleLit(float cx, float cy, float radius, int segments, float lightDirX, float lightDirY)
+{
+	// normalize light dir
+	float ldlen = sqrtf(lightDirX * lightDirX + lightDirY * lightDirY);
+	if (ldlen == 0.0f) { lightDirX = 0.0f; lightDirY = 1.0f; ldlen = 1.0f; }
+	lightDirX /= ldlen; lightDirY /= ldlen;
+
+	glBegin(GL_TRIANGLE_FAN);
+	// center is brightest (snow highlight)
+	glColor3f(1.0f, 1.0f, 1.0f);
+	glVertex2f(cx, cy);
+
+	for (int i = 0; i <= segments; ++i) {
+		float a = (2.0f * 3.14159265359f * i) / segments;
+		float sx = cosf(a), sy = sinf(a);
+		float vx = cx + sx * radius;
+		float vy = cy + sy * radius;
+
+		// approximate lighting: dot between outward normal (sx,sy) and light dir
+		float nd = sx * lightDirX + sy * lightDirY;
+		if (nd < 0.0f) nd = 0.0f;
+		// map nd to brightness in [0.7,1.0] for subtle shading
+		float bright = 0.7f + 0.3f * nd;
+		glColor3f(bright, bright, bright);
+
+		glVertex2f(vx, vy);
+	}
+	glEnd();
+}
+
+void drawCircleFlat(float cx, float cy, float radius, int segments)
+{
+	glBegin(GL_TRIANGLE_FAN);
+	glVertex2f(cx, cy);
+	for (int i = 0; i <= segments; ++i) {
+		float angle = 2.0f * 3.14159265359f * (float)i / (float)segments;
+		glVertex2f(cx + cosf(angle) * radius, cy + sinf(angle) * radius);
+	}
+	glEnd();
+}
+
+/* Computes head center/radius and eye centers for the snowman at its current
+   position and size. Shared by think() (pupil tracking) and drawSnowman()
+   (drawing), so the geometry only lives in one place. */
+void getSnowmanEyeGeometry(float cx, float cy, float baseRadius,
+	float* headCenterX, float* headCenterY, float* headRadiusPx,
+	float* leftEyeX, float* rightEyeX, float* eyeY)
+{
+	float overlapMiddle = 0.70f;
+	float overlapHead = 0.30f;
+
+	float baseRadiusPx = baseRadius;
+	float middleRadiusPx = baseRadius * 0.82f;
+	float hRadiusPx = baseRadius * 0.62f;
+
+	float middleCenterY = cy + baseRadiusPx + middleRadiusPx - overlapMiddle * middleRadiusPx;
+	float hCenterY = middleCenterY + middleRadiusPx + hRadiusPx - overlapHead * hRadiusPx;
+
+	*headCenterX = cx;
+	*headCenterY = hCenterY;
+	*headRadiusPx = hRadiusPx;
+	*leftEyeX = cx - EYE_OFFSET_X * hRadiusPx;
+	*rightEyeX = cx + EYE_OFFSET_X * hRadiusPx;
+	*eyeY = hCenterY + EYE_OFFSET_Y * hRadiusPx;
+}
+
+void drawSnowman(float cx, float cy, float baseRadius)
+{
+	// overlap: 0.0 = just touching, 0.5 = 50% overlap
+	float overlapMiddle = 0.70f; // how much the middle ball sinks into the base ball
+	float overlapHead = 0.30f; // how much the head sinks into the middle ball
+
+	// relative radii (tweak ratios as you like)
+	float baseRadiusPx = baseRadius;         // base ball
+	float middleRadiusPx = baseRadius * 0.82f; // middle ball
+	float headRadiusPx = baseRadius * 0.62f; // head ball
+
+	// center position of each ball, built bottom-up
+	float baseCenterX = cx, baseCenterY = cy;
+
+	float middleCenterX = cx;
+	float middleCenterY = baseCenterY + baseRadiusPx + middleRadiusPx - overlapMiddle * middleRadiusPx;
+
+	float headCenterX = cx;
+	float headCenterY = middleCenterY + middleRadiusPx + headRadiusPx - overlapHead * headRadiusPx;
+
+	// light direction (from top-left)
+	float lightDirX = -0.5f, lightDirY = 0.8f;
+
+	// draw balls: largest first (back-to-front)
+	drawFilledCircleLit(baseCenterX, baseCenterY, baseRadiusPx, 48, lightDirX, lightDirY);
+	drawFilledCircleLit(middleCenterX, middleCenterY, middleRadiusPx, 40, lightDirX, lightDirY);
+	drawFilledCircleLit(headCenterX, headCenterY, headRadiusPx, 36, lightDirX, lightDirY);
+
+	/* --- Face: eyes and nose, positioned relative to head center and head radius --- */
+
+	// Tweak these to taste — all expressed as fractions of headRadiusPx so they scale with the snowman.
+	
+
+	float noseOffsetY = -0.1f;   // vertical position on the head, as fraction of head radius (+ up, - down, 0 = centered)
+	float noseLength = 0.55f; // how far the nose pokes out to the right, as fraction of head radius
+	float noseHalfWidth = 0.14f; // half-width of nose base, as fraction of head radius
+
+	glDisable(GL_DEPTH_TEST);
+
+	/* Following Eyes*/
+	{
+		// Px means "pixels" — these are computed from the head radius in pixels, so they scale with the snowman size.
+		float leftEyeX = headCenterX - EYE_OFFSET_X * headRadiusPx;
+		float rightEyeX = headCenterX + EYE_OFFSET_X * headRadiusPx;
+		float eyeY = headCenterY + EYE_OFFSET_Y * headRadiusPx;
+		float eyeRadiusPx = EYE_RADIUS_FRAC * headRadiusPx;
+		float pupilRadiusPx = PUPIL_RADIUS_FRAC * headRadiusPx;
+		float eyeOutlineRadiusPx = eyeRadiusPx * 1.15f; // slightly bigger than the white, acts as an outlineExa
+
+		// Grey circle drawn first, slightly larger — its edge peeks out from behind the white to form an outline
+		glColor3f(0.6f, 0.6f, 0.6f);
+		drawCircleFlat(leftEyeX, eyeY, eyeOutlineRadiusPx, 24);
+		drawCircleFlat(rightEyeX, eyeY, eyeOutlineRadiusPx, 24);
+
+		glColor3f(1.0f, 1.0f, 1.0f); // white of the eyes
+		drawCircleFlat(leftEyeX, eyeY, eyeRadiusPx, 24);
+		drawCircleFlat(rightEyeX, eyeY, eyeRadiusPx, 24);
+
+		glColor3f(0.05f, 0.05f, 0.05f); // dark pupils
+		drawCircleFlat(leftEyeX + leftPupilOffsetX, eyeY + leftPupilOffsetY, pupilRadiusPx, 20);
+		drawCircleFlat(rightEyeX + rightPupilOffsetX, eyeY + rightPupilOffsetY, pupilRadiusPx, 20);
+	}
+
+	/* Nose: single orange triangle pointing right, out from the edge of the head */
+	glColor3f(1.0f, 0.55f, 0.1f);
+
+	float noseBaseX = headCenterX;
+	float noseY = headCenterY + noseOffsetY * headRadiusPx; // only Y is adjustable — X stays locked to the head edge
+	float noseHalfWidthPx = noseHalfWidth * headRadiusPx;
+	float noseLengthPx = noseLength * headRadiusPx;
+
+	glBegin(GL_TRIANGLES);
+	// Base is vertical (spread along Y at the head's edge), tip pokes out to the right
+	glVertex2f(noseBaseX, noseY - noseHalfWidthPx); // base-top
+	glVertex2f(noseBaseX, noseY + noseHalfWidthPx); // base-bottom
+	glVertex2f(noseBaseX + noseLengthPx, noseY);    // tip — pokes out to the right
+	glEnd();
+
+	/* Mouth: simple black circle */
+	glColor3f(0.0f, 0.0f, 0.0f); // black
+	float mouthRadiusPx = 0.1f * headRadiusPx;
+	float mouthOffsetY = -0.3f * headRadiusPx; // below center
+	drawCircleFlat(headCenterX, headCenterY + mouthOffsetY, mouthRadiusPx, 12);
+
+	glEnable(GL_DEPTH_TEST);
+
+	/* --- Snowman body buttons, one centered on middle ball and one centered on base ball --- */
+
+	float topmiddleButtonSize = 0.10f; // as fraction of middle ball radius
+	float botmiddleButtonSize = 0.10f; // as fraction of middle ball radius
+	float baseButtonSize = 0.10f; // as fraction of base ball radius
+
+	glColor3f(0.0f, 0.0f, 0.0f); // buttons are solid black
+
+	float topmiddleButtonDiameterPx = topmiddleButtonSize * middleRadiusPx * 2.0f; // glPointSize is a diameter, not a radius
+	float botmiddleButtonDiameterPx = botmiddleButtonSize * middleRadiusPx * 2.5f;
+	float baseButtonDiameterPx = baseButtonSize * baseRadiusPx * 4.0f; // This value changes the size of the top button on the base ball
+
+	glPointSize(topmiddleButtonDiameterPx);
+	glBegin(GL_POINTS);
+	glVertex2f(middleCenterX, middleCenterY + 15.0f);
+	glEnd();
+
+	glPointSize(botmiddleButtonDiameterPx);
+	glBegin(GL_POINTS);
+	glVertex2f(middleCenterX, middleCenterY - 15.0f);
+	glEnd();
+
+	glPointSize(baseButtonDiameterPx);
+	glBegin(GL_POINTS);
+	glVertex2f(baseCenterX, baseCenterY);
+	glEnd();
+
+}
+
+
+/* Sample ground height at a given screen X. Linearly interpolates between top vertices. */
+float getGroundHeightAtX(float x)
+{
+	if (GROUND_VERTS < 2) return windowHeight / 4.0f;
+	if (x <= groundTop[0].x) return groundTop[0].y;
+	if (x >= groundTop[GROUND_VERTS - 1].x) return groundTop[GROUND_VERTS - 1].y;
+	for (int i = 0; i < GROUND_VERTS - 1; ++i) {
+		float x0 = groundTop[i].x, x1 = groundTop[i + 1].x;
+		if (x >= x0 && x <= x1) {
+			float t = (x - x0) / (x1 - x0);
+			return groundTop[i].y * (1.0f - t) + groundTop[i + 1].y * t;
+		}
+	}
+	return windowHeight / 4.0f;
+}
+/* Initialise the particle system by marking all particles as inactive */
+void particles_init(void)
+{
+	for (int i = 0; i < MAX_PARTICLES; ++i) {
+		particles[i].active = 0;
+		particles[i].age = 0.0f;
+	}
+}
+
+/* Spawn up to 'count' new particles by recycling inactive slots*/
+void spawn_particles(int count)
+{
+	for (int c = 0; c < count; ++c) {
+		for (int i = 0; i < MAX_PARTICLES; ++i) {
+			if (!particles[i].active) {
+				/* initialize attributes in screen-space (0 to windowWidth/Height) */
+				particles[i].position.x = ((float)rand() / RAND_MAX) * windowWidth;
+				particles[i].position.y = (float)windowHeight; // spawn at top of screen
+				particles[i].position.z = 0.0f; // in front of snowman (same plane)
+				//particles[i].vx = ((float)rand() / RAND_MAX) * 2.0f * particleInitVxScale - particleInitVxScale; // random horizontal velocity
+				//particles[i].vy = -((float)rand() / RAND_MAX) * particleInitVyScale - 0.1f; // random downward velocity
+				particles[i].vx = ((float)rand() / RAND_MAX) * 100.0f * particleInitVxScale - 50.0f * particleInitVxScale;
+				particles[i].vy = -((float)rand() / RAND_MAX) * 150.0f * particleInitVyScale - 75.0f; // downward velocity
+				particles[i].vz = 0.0f; // no velocity in Z direction for 2D effect
+
+
+				//particles[i].vx = ((float)rand() / RAND_MAX) * 1.0f - 0.5f; // horizontal spread
+				//particles[i].vy = -((float)rand() / RAND_MAX) * 0.1f - 0.5f; // initial downward velocity
+				particles[i].size = ((float)rand() / RAND_MAX) * 3.0f + 1.5f; // random size between 2.0 and 5.0
+				particles[i].age = 0.0f;
+				particles[i].lifetime = 5.0f + ((float)rand() / RAND_MAX) * 10.0f; // 1..11s
+				particles[i].active = 1;
+				break; /* spawn one particle per call to this function */
+			}
+		}
+	}
+}
+
+void particles_update(float dt)
+{
+	//const float gravity = particleGravity;
+	const float gravity = particleGravity * 300.0f; // scale gravity for screen-space (pixels/sec²)
+	//const float gravity = -0.98f; /* units per second^2 (tuned for demo) */
+	for (int i = 0; i < MAX_PARTICLES; ++i) {
+		if (!particles[i].active) continue;
+
+		particles[i].age += dt;
+		if (particles[i].age > particles[i].lifetime) {
+			particles[i].active = 0; /* deactivate for reuse*/
+			continue;
+		}
+		/* Integrate velocity/position */
+		particles[i].vy += gravity * dt;
+		particles[i].position.x += particles[i].vx * dt; // update position based on velocity
+		particles[i].position.y += particles[i].vy * dt;
+
+		/* Extinction: out of view*/
+		if (particles[i].position.y < 0.0f ||
+			particles[i].position.x < -100.0f ||
+			particles[i].position.x > windowWidth + 100.0f) {
+			particles[i].active = 0;
+			/*if (particles[i].position.y < -1.5f ||
+				particles[i].position.x < -2.0f ||
+				particles[i].position.x > 2.0f) {
+				particles[i].active = 0;*/
+		}
+	}
+}
+
+/* Draw all active particles as GL_POINTS */
+void particles_draw(void)
+{
+	activeParticleCount = 0; // reset counter
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	for (int i = 0; i < MAX_PARTICLES; ++i) {
+		if (!particles[i].active) continue;
+		activeParticleCount++; // COUNT ACTIVE PARTICLES
+		/* size and color vary with age */
+		float t = particles[i].age / particles[i].lifetime;
+		float alpha = 0.8f - t;
+		glColor4f(1.0f, 1.0f, 1.0f, alpha);
+		glPointSize(particles[i].size);
+		glBegin(GL_POINTS);
+		glVertex2f(particles[i].position.x, particles[i].position.y);
+		glEnd();
+	}
+	glDisable(GL_BLEND);
+}
+
+///* Test draw: create a known particle and draw as a point primitive. Called from display() */
+/* Draw diagnostics information in top-left corner */
+void drawDiagnostics(void)
+{
+	if (!showDiagnostics) return;
+
+	// Save current state
+	GLboolean depthTestEnabled = glIsEnabled(GL_DEPTH_TEST);
+	glDisable(GL_DEPTH_TEST);
+
+	// Set white color
+	glColor3f(1.0f, 1.0f, 1.0f);
+
+	// Set raster position for top-left (adjust y for font baseline)
+	int startX = 10;
+	int startY = windowHeight - 20;
+	int lineHeight = 20;
+
+	// Draw control lines
+	for (int i = 0; i < NUM_DIAGNOSTIC_LINES; i++) {
+		const char* line = diagnosticsLines[i];
+		glRasterPos2i(startX, startY - i * lineHeight);
+		while (*line) {
+			glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, *line);
+			line++;
+		}
+	}
+
+	// Draw particle count
+	char particleStr[32];
+	sprintf_s(particleStr, sizeof(particleStr), "%3d/%4d active", activeParticleCount, MAX_PARTICLES);
+	glRasterPos2i(startX, startY - NUM_DIAGNOSTIC_LINES * lineHeight);
+	const char* p = particleStr;
+	while (*p) {
+		glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, *p);
+		p++;
+	}
+
+	// Restore state
+	if (depthTestEnabled) glEnable(GL_DEPTH_TEST);
+}
+
+/* ----- Background snow functions ----- */
+void spawn_background_particles(int count)
+{
+    for (int c = 0; c < count; ++c) {
+        for (int i = 0; i < MAX_BACK_PARTICLES; ++i) {
+            if (!backParticles[i].active) {
+                /* initialize attributes in screen-space (0 to windowWidth/Height) */
+                backParticles[i].position.x = ((float)rand() / RAND_MAX) * windowWidth;
+                backParticles[i].position.y = (float)windowHeight; // spawn at top of screen
+                backParticles[i].position.z = -0.5f; // depth behind snowman
+                backParticles[i].vx = ((float)rand() / RAND_MAX) * 100.0f * particleInitVxScale - 50.0f * particleInitVxScale;
+                backParticles[i].vy = -((float)rand() / RAND_MAX) * 150.0f * particleInitVyScale - 75.0f; // downward velocity
+                backParticles[i].size = ((float)rand() / RAND_MAX) * 3.0f + 1.5f; // random size between 2.0 and 5.0
+                backParticles[i].age = 0.0f;
+                backParticles[i].lifetime = 5.0f + ((float)rand() / RAND_MAX) * 10.0f; // 1..11s
+                backParticles[i].active = 1;
+                break; /* spawn one particle per call to this function */
+            }
+        }
+    }
+}
+
+void update_background_particles(float dt)
+{
+    const float gravity = particleGravity * 300.0f; // scale gravity for screen-space (pixels/sec²)
+    for (int i = 0; i < MAX_BACK_PARTICLES; ++i) {
+        if (!backParticles[i].active) continue;
+
+        backParticles[i].age += dt;
+        if (backParticles[i].age > backParticles[i].lifetime) { backParticles[i].active = 0; continue; }
+
+        backParticles[i].vy += gravity * dt;
+        backParticles[i].position.x += backParticles[i].vx * dt;
+        backParticles[i].position.y += backParticles[i].vy * dt;
+
+        /* Extinction: out of view*/
+        if (backParticles[i].position.y < 0.0f ||
+            backParticles[i].position.x < -100.0f ||
+            backParticles[i].position.x > windowWidth + 100.0f) {
+            backParticles[i].active = 0;
+        }
+    }
+}
+
+void draw_background_particles(void)
+{
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    for (int i = 0; i < MAX_BACK_PARTICLES; ++i) {
+        if (!backParticles[i].active) continue;
+        float t = backParticles[i].age / backParticles[i].lifetime;
+        float alpha = 0.8f - t;
+        glColor4f(1.0f, 1.0f, 1.0f, alpha);
+        glPointSize(backParticles[i].size);
+        glBegin(GL_POINTS);
+        glVertex3f(backParticles[i].position.x, backParticles[i].position.y, backParticles[i].position.z);
+        glEnd();
+    }
+    glDisable(GL_BLEND);
+}
+
+
+void spawnBreathPuff(void)
+{
+    int i = 0;
+    while (i < MAX_BREATH && breathParticles[i].active) i++;
+    if (i >= MAX_BREATH) return; // no free slot
+
+    BreathParticle *b = &breathParticles[i];
+    /* spawn from the snowman's nose/mouth - use the snowman's head center */
+    float headCenterX, headCenterY, headRadiusPx;
+    float leftEyeX, rightEyeX, eyeY;   /* we only need the head center */
+    getSnowmanEyeGeometry(snowmanX, snowmanY, snowmanBaseR,
+                          &headCenterX, &headCenterY, &headRadiusPx,
+                          &leftEyeX, &rightEyeX, &eyeY);
+
+    b->x = headCenterX;
+    b->y = headCenterY + -0.3f * headRadiusPx;   // spawn location at mouth height!
+    b->age = 0.0f;
+    b->lifetime = BREATH_LIFE;
+    b->radius = 2.0f;                           // start small
+    b->alpha  = 0.6f;                           // semi-transparent
+
+    // outward direction - you can make it follow the mouse or a fixed angle
+    float angle = 0.0f;                         // 0 = straight right
+    b->vx = cosf(angle) * BREATH_SPEED;
+    b->vy = sinf(angle) * BREATH_SPEED;
+
+    b->active = 1;
+}
+
+void updateBreathParticles(float dt)
+{
+    for (int i = 0; i < MAX_BREATH; ++i) {
+        if (!breathParticles[i].active) continue;
+
+        BreathParticle *b = &breathParticles[i];
+        b->age += dt;
+        if (b->age > b->lifetime) { b->active = 0; continue; }
+
+        // simple outward drift
+        b->x += b->vx * dt;
+        b->y += b->vy * dt;
+
+        // fade & grow
+        float t = b->age / b->lifetime;
+        b->radius = 2.0f + 8.0f * t;          // 2 -> 10 px
+        b->alpha  = 0.6f * (1.0f - t);        // 0.6 -> 0
+    }
+}
+
+void drawBreathPuffs(void)
+{
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_DEPTH_TEST);      // puffs are always on top (optional)
+
+    for (int i = 0; i < MAX_BREATH; ++i) {
+        if (!breathParticles[i].active) continue;
+        BreathParticle *b = &breathParticles[i];
+
+        glColor4f(0.9f, 0.9f, 1.0f, b->alpha);   // slight blue-white
+        int segs = 12;
+        glBegin(GL_TRIANGLE_FAN);
+        glVertex2f(b->x, b->y);                  // centre
+        for (int j = 0; j <= segs; ++j) {
+            float a = 2.0f * 3.14159265f * (float)j / (float)segs;
+            glVertex2f(b->x + cosf(a) * b->radius,
+                       b->y + sinf(a) * b->radius);
+        }
+        glEnd();
+    }
+    glDisable(GL_BLEND);
+    if (glIsEnabled(GL_DEPTH_TEST)) glEnable(GL_DEPTH_TEST);
+}
+
+void applyBreathToSnow(float dt)
+{
+    const float influenceRadius = 80.0f;   // px
+    const float influenceStrength = 0.4f;  // how much velocity to add
+
+    for (int i = 0; i < MAX_BREATH; ++i) {
+        if (!breathParticles[i].active) continue;
+        BreathParticle *b = &breathParticles[i];
+
+        for (int j = 0; j < MAX_PARTICLES; ++j) {
+            if (!particles[j].active) continue;
+            float dx = particles[j].position.x - b->x;
+            float dy = particles[j].position.y - b->y;
+            float distSq = dx*dx + dy*dy;
+            if (distSq > influenceRadius*influenceRadius) continue;
+
+            float influence = influenceStrength * (1.0f - sqrtf(distSq)/influenceRadius);
+            particles[j].vx += b->vx * influence * dt;
+            particles[j].vy += b->vy * influence * dt;
+        }
+    }
+}
+
+//void particle_test_draw(void)
+//{
+//	/* Known position in clip-space */
+//	float tx = 0.0f;
+//	float ty = 0.0f;
+//	glColor3f(1.0f, 1.0f, 1.0f);
+//	glPointSize(8.0f);
+//	glBegin(GL_POINTS);
+//	glVertex2f(tx, ty);
+//	glEnd();
+//}
+
+/**************************************2026*S2****************************************/

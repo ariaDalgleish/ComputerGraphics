@@ -15,7 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="sourceFile.c">
+    <ClCompile Include="aria_dalgleish_sourceFile.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
