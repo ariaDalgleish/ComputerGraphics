@@ -1,0 +1,41 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\tdp6747\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\OctopusProject\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{CBDC90BE-9B6E-401C-9A2F-B89EDBCAB936}|OctopusProject.vcxproj|C:\\Users\\tdp6747\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\OctopusProject\\Main.c||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{CBDC90BE-9B6E-401C-9A2F-B89EDBCAB936}|OctopusProject.vcxproj|solutionrelative:Main.c||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 1,
+          "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{aa2115a1-9712-457b-9047-dbb71ca2cdd2}"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "Main.c",
+              "DocumentMoniker": "C:\\Users\\tdp6747\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\OctopusProject\\Main.c",
+              "RelativeDocumentMoniker": "Main.c",
+              "ToolTip": "C:\\Users\\tdp6747\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\OctopusProject\\Main.c",
+              "RelativeToolTip": "Main.c",
+              "ViewState": "AgIAAAIAAAAAAAAAAAArwBIAAAAJAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000423|",
+              "WhenOpened": "2026-09-08T03:45:21.992Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

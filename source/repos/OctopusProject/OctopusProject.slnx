@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="OctopusProject.vcxproj" Id="cbdc90be-9b6e-401c-9a2f-b89edbcab936" />
+</Solution>
