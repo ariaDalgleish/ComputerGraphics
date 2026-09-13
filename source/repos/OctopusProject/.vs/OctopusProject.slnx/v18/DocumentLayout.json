@@ -1,10 +1,13 @@
 {
   "Version": 1,
-  "WorkspaceRootPath": "C:\\Users\\tdp6747\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\OctopusProject\\",
+  "WorkspaceRootPath": "C:\\Users\\aria\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\OctopusProject\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{CBDC90BE-9B6E-401C-9A2F-B89EDBCAB936}|OctopusProject.vcxproj|C:\\Users\\tdp6747\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\OctopusProject\\Main.c||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
-      "RelativeMoniker": "D:0:0:{CBDC90BE-9B6E-401C-9A2F-B89EDBCAB936}|OctopusProject.vcxproj|solutionrelative:Main.c||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\aria\\Downloads\\robotArm.c||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{46184A46-5D2D-45FF-AD67-7BDD8E252AB7}|OctopusProject.vcxproj|C:\\Users\\aria\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\OctopusProject\\Main.c||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{46184A46-5D2D-45FF-AD67-7BDD8E252AB7}|OctopusProject.vcxproj|solutionrelative:Main.c||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
     }
   ],
   "DocumentGroupContainers": [
@@ -23,14 +26,33 @@
             {
               "$type": "Document",
               "DocumentIndex": 0,
-              "Title": "Main.c",
-              "DocumentMoniker": "C:\\Users\\tdp6747\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\OctopusProject\\Main.c",
-              "RelativeDocumentMoniker": "Main.c",
-              "ToolTip": "C:\\Users\\tdp6747\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\OctopusProject\\Main.c",
-              "RelativeToolTip": "Main.c",
-              "ViewState": "AgIAAAIAAAAAAAAAAAArwBIAAAAJAAAAAAAAAA==",
+              "Title": "robotArm.c",
+              "DocumentMoniker": "C:\\Users\\aria\\Downloads\\robotArm.c",
+              "RelativeDocumentMoniker": "..\\..\\..\\..\\..\\..\\Downloads\\robotArm.c",
+              "ToolTip": "C:\\Users\\aria\\Downloads\\robotArm.c",
+              "RelativeToolTip": "..\\..\\..\\..\\..\\..\\Downloads\\robotArm.c",
+              "ViewState": "AgIAAPMAAAAAAAAAAAAAAAMBAABIAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000423|",
-              "WhenOpened": "2026-09-08T03:45:21.992Z",
+              "WhenOpened": "2026-09-13T22:31:38.815Z",
+              "EditorCaption": ""
+            }
+          ]
+        },
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "Main.c",
+              "DocumentMoniker": "C:\\Users\\aria\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\OctopusProject\\Main.c",
+              "RelativeDocumentMoniker": "Main.c",
+              "ToolTip": "C:\\Users\\aria\\Documents\\GitHub\\ComputerGraphics\\source\\repos\\OctopusProject\\Main.c",
+              "RelativeToolTip": "Main.c",
+              "ViewState": "AgIAAEgBAAAAAAAAAAAMwFwBAAATAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000423|",
+              "WhenOpened": "2026-09-13T22:19:21.304Z",
               "EditorCaption": ""
             }
           ]

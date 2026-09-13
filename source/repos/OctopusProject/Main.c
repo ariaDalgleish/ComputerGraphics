@@ -1,5 +1,3 @@
-// Hullo!
-
 /******************************************************************************
  *
  * Computer Graphics Programming 2026 Project Template v2.3 (05/03/2026)
@@ -116,6 +114,14 @@ motionstate4_t keyboardMotion = { MOTION_NONE, MOTION_NONE, MOTION_NONE, MOTION_
 #define SP_KEY_TURN_LEFT	GLUT_KEY_LEFT
 #define SP_KEY_TURN_RIGHT	GLUT_KEY_RIGHT
 
+#define KEY_BASE			'1' // Select arm base.
+#define KEY_LOWER_ARM		'2' // Select lower arm joint.
+#define KEY_UPPER_ARM		'3' // Select upper arm joint.
+#define KEY_ANGLE_INC		'a' // Increment angle (rotate joint anti-clockwise)
+#define KEY_ANGLE_DEC		'd' // Decrement angle (rotate joint clockwise)
+#define KEY_EXIT			27	// Escape key.
+
+
 /******************************************************************************
  * GLUT Callback Prototypes
  ******************************************************************************/
@@ -137,12 +143,52 @@ void init(void);
 void think(void);
 void initLights(void);
 
+void base(void);
+void armSegment(float armWidth, float armHeight);
+
 /******************************************************************************
  * Animation-Specific Setup (Add your own definitions, constants, and globals here)
  ******************************************************************************/
 
  // Render objects as filled polygons (1) or wireframes (0). Default filled.
 int renderFillEnabled = 1;
+
+// dimensions of the base
+#define BASE_HEIGHT 2.0
+#define BASE_RADIUS 1.0
+
+// dimensions of the lower arm
+#define LOWER_ARM_HEIGHT 5.0
+#define LOWER_ARM_WIDTH  0.5
+
+// dimensions of the upper arm
+#define UPPER_ARM_HEIGHT 3.0
+#define UPPER_ARM_WIDTH  0.5
+
+// arm joints (this map to the indices in angles[])
+#define JOINT_BASE 0
+#define JOINT_LOWER_ARM 1
+#define JOINT_UPPER_ARM 2
+
+// joint motion directions
+#define MOVE_NONE 0			// Joint isn't moving
+#define MOVE_ANGLE_INC 1	// Increment angle (rotate anti-clockwise)
+#define MOVE_ANGLE_DEC -1	// Decrement angle (rotate clockwise)
+
+// joint rotation speed
+const float JOINT_ROTATION_SPEED = 40.0f; // degrees per second
+
+// three angles for each of the threes joints in the robot
+GLfloat angles[] = { 0.0, 0.0, 0.0 };
+
+// current joint  (JOINT_BASE, JOINT_LOWER_ARM, or JOINT_UPPER_ARM)
+GLint joint = JOINT_BASE;
+
+// direction the current joint is moving (MOVE_NONE, MOVE_ANGLE_DEC, or MOVE_ANGLE_INC)
+GLint jointMoveDir = MOVE_NONE;
+
+// pointer to quadric object
+GLUquadricObj* myQuadric;
 
 /******************************************************************************
  * Entry Point (don't put anything except the main function here)
@@ -200,6 +246,30 @@ void display(void)
 		Remember to add prototypes for any new functions to the "Animation-Specific
 		Function Prototypes" section near the top of this template.
 	*/
+	// clear the window
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	// start with a fresh transformation matrix
+	glLoadIdentity();
+
+	// rotate the base and draw it  (notice that we don't use push and pop)
+	glRotatef(angles[0], 0.0, 1.0, 0.0);
+	glColor3f(joint == JOINT_BASE ? 1.0f : 0.5f, 0.0, 0.0);
+	base();
+
+	glTranslated(0.0, BASE_HEIGHT, 0.0);
+	glRotatef(angles[1], 0.0, 0.0, 1.0);
+	glColor3f(joint == JOINT_LOWER_ARM ? 1.0f : 0.5f, 0.0, 0.0);
+	armSegment(LOWER_ARM_WIDTH, LOWER_ARM_HEIGHT);
+
+	// rotate the upper arm, move it to the end of the lower arm and draw it
+	glTranslatef(0.0, LOWER_ARM_HEIGHT, 0.0);
+	glRotatef(angles[2], 0.0, 0.0, 1.0);
+	glColor3f(joint == JOINT_UPPER_ARM ? 1.0f : 0.5f, 0.0, 0.0);
+	armSegment(UPPER_ARM_WIDTH, UPPER_ARM_HEIGHT);
+
+
+	glutSwapBuffers();
 }
 
 /*
@@ -207,6 +277,24 @@ void display(void)
 */
 void reshape(int width, int h)
 {
+	// set the viewport
+	glViewport(0, 0, width, h);
+
+	// set the orthographic projection
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	if (width <= h)
+		glOrtho(-10.0, 10.0,
+			-5.0 * (GLfloat)h / (GLfloat)width, 15.0 * (GLfloat)h / (GLfloat)width,
+			-10.0, 10.0);
+	else
+		glOrtho(-10.0 * (GLfloat)width / (GLfloat)h, 10.0 * (GLfloat)width / (GLfloat)h,
+			-5.0, 15.0,
+			-10.0, 10.0);
+
+	// return to model view mode
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
 }
 
 /*
@@ -252,6 +340,21 @@ void keyPressed(unsigned char key, int x, int y)
 			For example, refer to the existing keys used here (KEY_MOVE_FORWARD,
 			KEY_MOVE_LEFT, KEY_EXIT, etc).
 		*/
+		case KEY_BASE:
+			joint = JOINT_BASE;
+			break;
+		case KEY_LOWER_ARM:
+			joint = JOINT_LOWER_ARM;
+			break;
+		case KEY_UPPER_ARM:
+			joint = JOINT_UPPER_ARM;
+			break;
+		/*case KEY_ANGLE_DEC:
+			jointMoveDir = MOVE_ANGLE_DEC;
+			break;
+		case KEY_ANGLE_INC:
+			jointMoveDir = MOVE_ANGLE_INC;
+			break;*/
 	case KEY_RENDER_FILL:
 		renderFillEnabled = !renderFillEnabled;
 		break;
@@ -349,6 +452,13 @@ void keyReleased(unsigned char key, int x, int y)
 			flag to turn it off in keyReleased.
 		*/
 	}
+	switch (tolower(key)) {
+	case KEY_ANGLE_DEC:
+	case KEY_ANGLE_INC:
+		jointMoveDir = MOVE_NONE;
+		break;
+
+	}
 }
 
 /*
@@ -429,6 +539,13 @@ void init(void)
 {
 	initLights();
 
+	// set the clear color and the drawing color
+	glClearColor(1.0, 1.0, 1.0, 1.0);
+
+	// create a new quadric for drawing the cylinder
+	myQuadric = gluNewQuadric();
+	// render it as wireframe object
+	gluQuadricDrawStyle(myQuadric, GLU_LINE);
 	// Anything that relies on lighting or specifies normals must be initialised after initLights.
 }
 
@@ -498,6 +615,10 @@ void think(void)
 	if (keyboardMotion.Heave != MOTION_NONE) {
 		/* TEMPLATE: Move your object down if .Heave < 0, or up if .Heave > 0 */
 	}
+	if (jointMoveDir != MOVE_NONE) {
+		// move the current joint in the right direction (jointMoveDir) at our predefined constant speed
+		angles[joint] = fmodf(angles[joint] + jointMoveDir * JOINT_ROTATION_SPEED * FRAME_TIME_SEC, 360.0f);
+	}
 }
 
 /*
@@ -507,6 +628,35 @@ void think(void)
 	off, or change colour) you may want to replace this with a drawLights function that gets called
 	at the beginning of display() instead of init().
 */
+
+void base(void)
+{
+	glPushMatrix();
+
+	// rotate cylinder to align with y axis (originally aligned with the Z axis) 
+	glRotatef(-90.0, 1.0, 0.0, 0.0);
+
+	// cyliner aligned with z axis, render with
+	// 10 slices for base and 10 along length 
+	gluCylinder(myQuadric, BASE_RADIUS, BASE_RADIUS, BASE_HEIGHT, 10, 10);
+
+	glPopMatrix();
+}
+
+void armSegment(float armWidth, float armHeight)
+{
+	glPushMatrix();
+	// move the arm to be above the origin
+	glTranslatef(0.0f, 0.5f * armHeight, 0.0f);
+
+	// scale the arm so that it is long and thin
+	glScalef(armWidth, armHeight, armWidth);
+
+	// draw the arm
+	glutWireCube(1.0);
+	glPopMatrix();
+}
+
 void initLights(void)
 {
 	// Simple lighting setup
