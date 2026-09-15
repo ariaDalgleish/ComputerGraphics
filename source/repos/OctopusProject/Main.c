@@ -114,14 +114,6 @@ motionstate4_t keyboardMotion = { MOTION_NONE, MOTION_NONE, MOTION_NONE, MOTION_
 #define SP_KEY_TURN_LEFT	GLUT_KEY_LEFT
 #define SP_KEY_TURN_RIGHT	GLUT_KEY_RIGHT
 
-#define KEY_BASE			'1' // Select arm base.
-#define KEY_LOWER_ARM		'2' // Select lower arm joint.
-#define KEY_UPPER_ARM		'3' // Select upper arm joint.
-#define KEY_ANGLE_INC		'a' // Increment angle (rotate joint anti-clockwise)
-#define KEY_ANGLE_DEC		'd' // Decrement angle (rotate joint clockwise)
-#define KEY_EXIT			27	// Escape key.
-
-
 /******************************************************************************
  * GLUT Callback Prototypes
  ******************************************************************************/
@@ -143,52 +135,77 @@ void init(void);
 void think(void);
 void initLights(void);
 
-void base(void);
-void armSegment(float armWidth, float armHeight);
-
 /******************************************************************************
  * Animation-Specific Setup (Add your own definitions, constants, and globals here)
  ******************************************************************************/
 
+#define BODY_RADIUS 1.0
+#define EYE_RADIUS 0.1
+#define BEAK_SCALE_FACTOR BODY_RADIUS/3.0
+#define TO_RADIANS 3.1415926f/180.0f
+
  // Render objects as filled polygons (1) or wireframes (0). Default filled.
 int renderFillEnabled = 1;
 
-// dimensions of the base
-#define BASE_HEIGHT 2.0
-#define BASE_RADIUS 1.0
+// window dimensions
+GLint windowWidth = 800;
+GLint windowHeight = 600;
 
-// dimensions of the lower arm
-#define LOWER_ARM_HEIGHT 5.0
-#define LOWER_ARM_WIDTH  0.5
+double flip = 0;
+double up = 3;
 
-// dimensions of the upper arm
-#define UPPER_ARM_HEIGHT 3.0
-#define UPPER_ARM_WIDTH  0.5
+float eye_x = 5;
+float eye_y = 5;
+float eye_z = 5;
 
-// arm joints (this map to the indices in angles[])
-#define JOINT_BASE 0
-#define JOINT_LOWER_ARM 1
-#define JOINT_UPPER_ARM 2
+float at_x = 0;
+float at_y = 0;
+float at_z = 0;
 
-// joint motion directions
-#define MOVE_NONE 0			// Joint isn't moving
-#define MOVE_ANGLE_INC 1	// Increment angle (rotate anti-clockwise)
-#define MOVE_ANGLE_DEC -1	// Decrement angle (rotate clockwise)
+float up_y = 1;
 
-// joint rotation speed
-const float JOINT_ROTATION_SPEED = 40.0f; // degrees per second
+int smoothOn = 1;
 
-// three angles for each of the threes joints in the robot
-GLfloat angles[] = { 0.0, 0.0, 0.0 };
+float object_angle_xz;
+float object_x;
+float object_y;
+float object_z;
+float propeller_angle = 0;
+float propeller_rotating_speed = 0;
+int move = 0;
+float vx = 0;
+float vz = 0;
 
-// current joint  (JOINT_BASE, JOINT_LOWER_ARM, or JOINT_UPPER_ARM)
-GLint joint = JOINT_BASE;
+GLUquadricObj* sphereQuadric;
+GLUquadricObj* cylinderQuadric;
 
-// direction the current joint is moving (MOVE_NONE, MOVE_ANGLE_DEC, or MOVE_ANGLE_INC)
-GLint jointMoveDir = MOVE_NONE;
+// a material that is all zeros
+GLfloat zeroMaterial[] = { 0.0, 0.0, 0.0, 1.0 };
 
-// pointer to quadric object
-GLUquadricObj* myQuadric;
+// a white diffuse material
+GLfloat whiteDiffuse[] = { 0.8f, 0.8f, 0.8f, 1.0f };
+
+// a white specular material
+GLfloat whiteSpecular[] = { 1, 1, 1, 1.0 };
+
+// other colours
+GLfloat PALE_GREEN[3] = { 0.596f, 0.984f, 0.596f };
+
+GLfloat BEAK_BROWN[3] = { 0.545f, 0.27f, 0.0745f };
+
+GLfloat YELLOW[3] = { 0.984f, 0.984f, 0.596f };
+
+GLfloat BRIGHT_YELLOW[3] = { 1.0f, 1.0f, 0.0f };
+
+GLfloat BLACK[3] = { 0.0f, 0.0f, 0.0f };
+
+GLfloat WHITE[3] = { 1.0f, 1.0f, 1.0f };
+
+GLfloat lowShininess = 25.0;
+
+void drawBird(void);
+void drawOriginMarker(void);
+
 
 /******************************************************************************
  * Entry Point (don't put anything except the main function here)
@@ -246,28 +263,34 @@ void display(void)
 		Remember to add prototypes for any new functions to the "Animation-Specific
 		Function Prototypes" section near the top of this template.
 	*/
-	// clear the window
+
+	if (smoothOn)
+		glShadeModel(GL_SMOOTH);
+	else
+		glShadeModel(GL_FLAT);
+
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	// start with a fresh transformation matrix
+	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
 
-	// rotate the base and draw it  (notice that we don't use push and pop)
-	glRotatef(angles[0], 0.0, 1.0, 0.0);
-	glColor3f(joint == JOINT_BASE ? 1.0f : 0.5f, 0.0, 0.0);
-	base();
+	if (!renderFillEnabled)
+		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	else
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	at_x = object_x;
+	at_y = object_y;
+	at_z = object_z;
 
-	glTranslated(0.0, BASE_HEIGHT, 0.0);
-	glRotatef(angles[1], 0.0, 0.0, 1.0);
-	glColor3f(joint == JOINT_LOWER_ARM ? 1.0f : 0.5f, 0.0, 0.0);
-	armSegment(LOWER_ARM_WIDTH, LOWER_ARM_HEIGHT);
+	gluLookAt(eye_x, eye_y, eye_z,
+		at_x, at_y, at_z, //looking at the origin
+		0.0, up_y, 0.0);
 
-	// rotate the upper arm, move it to the end of the lower arm and draw it
-	glTranslatef(0.0, LOWER_ARM_HEIGHT, 0.0);
-	glRotatef(angles[2], 0.0, 0.0, 1.0);
-	glColor3f(joint == JOINT_UPPER_ARM ? 1.0f : 0.5f, 0.0, 0.0);
-	armSegment(UPPER_ARM_WIDTH, UPPER_ARM_HEIGHT);
+	drawOriginMarker();
 
+	glTranslated(object_x, object_y, object_z);
+	glRotated(object_angle_xz, 0, 1, 0);
+	drawBird();
 
 	glutSwapBuffers();
 }
@@ -275,24 +298,16 @@ void display(void)
 /*
 	Called when the OpenGL window has been resized.
 */
-void reshape(int width, int h)
+void reshape(int width, int height)
 {
-	// set the viewport
-	glViewport(0, 0, width, h);
+	windowWidth = width;
+	windowHeight = height;
+	glViewport(0, 0, windowWidth, windowHeight);
 
-	// set the orthographic projection
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
-	if (width <= h)
-		glOrtho(-10.0, 10.0,
-			-5.0 * (GLfloat)h / (GLfloat)width, 15.0 * (GLfloat)h / (GLfloat)width,
-			-10.0, 10.0);
-	else
-		glOrtho(-10.0 * (GLfloat)width / (GLfloat)h, 10.0 * (GLfloat)width / (GLfloat)h,
-			-5.0, 15.0,
-			-10.0, 10.0);
+	gluPerspective(60, (float)windowWidth / (float)windowHeight, 1.0, 5000.0);
 
-	// return to model view mode
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
 }
@@ -315,6 +330,15 @@ void keyPressed(unsigned char key, int x, int y)
 				you're holding down KEY_MOVE_LEFT then also pressed KEY_MOVE_RIGHT,
 				our object will immediately start moving right).
 		*/
+	case ' ':
+		move = !move;
+		break;
+	case 'r':
+		if (propeller_rotating_speed == 0)
+			propeller_rotating_speed += 10;
+		else
+			propeller_rotating_speed = 0;
+		break;
 	case KEY_MOVE_FORWARD:
 		motionKeyStates.MoveForward = KEYSTATE_DOWN;
 		keyboardMotion.Surge = MOTION_FORWARD;
@@ -340,21 +364,7 @@ void keyPressed(unsigned char key, int x, int y)
 			For example, refer to the existing keys used here (KEY_MOVE_FORWARD,
 			KEY_MOVE_LEFT, KEY_EXIT, etc).
 		*/
-		case KEY_BASE:
-			joint = JOINT_BASE;
-			break;
-		case KEY_LOWER_ARM:
-			joint = JOINT_LOWER_ARM;
-			break;
-		case KEY_UPPER_ARM:
-			joint = JOINT_UPPER_ARM;
-			break;
-		/*case KEY_ANGLE_DEC:
-			jointMoveDir = MOVE_ANGLE_DEC;
-			break;
-		case KEY_ANGLE_INC:
-			jointMoveDir = MOVE_ANGLE_INC;
-			break;*/
+
 	case KEY_RENDER_FILL:
 		renderFillEnabled = !renderFillEnabled;
 		break;
@@ -452,13 +462,6 @@ void keyReleased(unsigned char key, int x, int y)
 			flag to turn it off in keyReleased.
 		*/
 	}
-	switch (tolower(key)) {
-	case KEY_ANGLE_DEC:
-	case KEY_ANGLE_INC:
-		jointMoveDir = MOVE_NONE;
-		break;
-
-	}
 }
 
 /*
@@ -537,15 +540,33 @@ void idle(void)
  */
 void init(void)
 {
+	// define the light color and intensity
+	GLfloat ambientLight[] = { 0.0, 0.0, 0.0, 1.0 };  // relying on global ambient
+	GLfloat diffuseLight[] = { 1.0, 1.0, 1.0, 1.0 };
+	GLfloat specularLight[] = { 1.0, 1.0, 1.0, 1.0 };
+
+	//  the global ambient light level
+	GLfloat globalAmbientLight[] = { 0.4f, 0.4f, 0.4f, 1.0f };
+
+	// define the color and intensity for light 0
+	glLightfv(GL_LIGHT0, GL_AMBIENT, ambientLight);
+	glLightfv(GL_LIGHT0, GL_SPECULAR, diffuseLight);
+	glLightfv(GL_LIGHT0, GL_DIFFUSE, specularLight);
+
+	// enable lighting 
+	glEnable(GL_LIGHTING);
+	// enable light 0
+
+	glEnable(GL_TEXTURE_2D);
+
+	// enable depth testing
+	glEnable(GL_DEPTH_TEST);
+
+	sphereQuadric = gluNewQuadric();
+	cylinderQuadric = gluNewQuadric();
+
 	initLights();
 
-	// set the clear color and the drawing color
-	glClearColor(1.0, 1.0, 1.0, 1.0);
-
-	// create a new quadric for drawing the cylinder
-	myQuadric = gluNewQuadric();
-	// render it as wireframe object
-	gluQuadricDrawStyle(myQuadric, GLU_LINE);
 	// Anything that relies on lighting or specifies normals must be initialised after initLights.
 }
 
@@ -605,6 +626,10 @@ void think(void)
 	*/
 	if (keyboardMotion.Yaw != MOTION_NONE) {
 		/* TEMPLATE: Turn your object right (clockwise) if .Yaw < 0, or left (anticlockwise) if .Yaw > 0 */
+		if (keyboardMotion.Yaw > 0)
+			object_angle_xz++;
+		else
+			object_angle_xz--;
 	}
 	if (keyboardMotion.Surge != MOTION_NONE) {
 		/* TEMPLATE: Move your object backward if .Surge < 0, or forward if .Surge > 0 */
@@ -615,10 +640,12 @@ void think(void)
 	if (keyboardMotion.Heave != MOTION_NONE) {
 		/* TEMPLATE: Move your object down if .Heave < 0, or up if .Heave > 0 */
 	}
-	if (jointMoveDir != MOVE_NONE) {
-		// move the current joint in the right direction (jointMoveDir) at our predefined constant speed
-		angles[joint] = fmodf(angles[joint] + jointMoveDir * JOINT_ROTATION_SPEED * FRAME_TIME_SEC, 360.0f);
-	}
+
+	propeller_angle += propeller_rotating_speed;
+	vx = cosf(object_angle_xz * TO_RADIANS) * 0.1f;
+	vz = -sinf(object_angle_xz * TO_RADIANS) * 0.1f;
+	object_x += (vx * move);
+	object_z += (vz * move);
 }
 
 /*
@@ -628,34 +655,6 @@ void think(void)
 	off, or change colour) you may want to replace this with a drawLights function that gets called
 	at the beginning of display() instead of init().
 */
-
-void base(void)
-{
-	glPushMatrix();
-
-	// rotate cylinder to align with y axis (originally aligned with the Z axis) 
-	glRotatef(-90.0, 1.0, 0.0, 0.0);
-
-	// cyliner aligned with z axis, render with
-	// 10 slices for base and 10 along length 
-	gluCylinder(myQuadric, BASE_RADIUS, BASE_RADIUS, BASE_HEIGHT, 10, 10);
-
-	glPopMatrix();
-}
-
-void armSegment(float armWidth, float armHeight)
-{
-	glPushMatrix();
-	// move the arm to be above the origin
-	glTranslatef(0.0f, 0.5f * armHeight, 0.0f);
-
-	// scale the arm so that it is long and thin
-	glScalef(armWidth, armHeight, armWidth);
-
-	// draw the arm
-	glutWireCube(1.0);
-	glPopMatrix();
-}
 
 void initLights(void)
 {
@@ -684,6 +683,156 @@ void initLights(void)
 
 	// Enable use of simple GL colours as materials.
 	glEnable(GL_COLOR_MATERIAL);
+}
+
+
+void drawBird(void)
+{
+	renderFillEnabled ? gluQuadricDrawStyle(sphereQuadric, GLU_FILL) : gluQuadricDrawStyle(sphereQuadric, GLU_LINE);
+	renderFillEnabled ? gluQuadricDrawStyle(cylinderQuadric, GLU_FILL) : gluQuadricDrawStyle(cylinderQuadric, GLU_LINE);
+
+	// body
+	glPushMatrix();
+	glRotated(90, 0, 1, 0); // rotate x and z axes 90 degree
+	glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
+	glMaterialfv(GL_FRONT, GL_DIFFUSE, YELLOW);
+	glMaterialfv(GL_FRONT, GL_SPECULAR, YELLOW);
+	glMaterialf(GL_FRONT, GL_SHININESS, lowShininess);
+
+	gluSphere(sphereQuadric, BODY_RADIUS, 50, 50);
+
+	// left eye
+	glPushMatrix();
+	glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
+	glMaterialfv(GL_FRONT, GL_DIFFUSE, BLACK);
+	glMaterialfv(GL_FRONT, GL_SPECULAR, WHITE);
+	glMaterialf(GL_FRONT, GL_SHININESS, lowShininess);
+	glTranslated(BODY_RADIUS * 0.3f, BODY_RADIUS * 0.6f, BODY_RADIUS * 0.7f);
+	gluSphere(sphereQuadric, EYE_RADIUS, 50, 50);
+	glPopMatrix();
+
+	// right eye
+	glPushMatrix();
+	glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
+	glMaterialfv(GL_FRONT, GL_DIFFUSE, BLACK);
+	glMaterialfv(GL_FRONT, GL_SPECULAR, WHITE);
+	glMaterialf(GL_FRONT, GL_SHININESS, lowShininess);
+	glTranslated(-BODY_RADIUS * 0.3f, BODY_RADIUS * 0.6f, BODY_RADIUS * 0.7f);
+	gluSphere(sphereQuadric, EYE_RADIUS, 50, 50);
+	glPopMatrix();
+
+	// beak
+	glPushMatrix();
+	glTranslated(0.0, 0.0, BODY_RADIUS + BODY_RADIUS / 4.0);
+	glRotated(-180, 0, 1, 0);
+	glScaled(0.5, 1.0, 1.0);
+	glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
+	glMaterialfv(GL_FRONT, GL_DIFFUSE, BEAK_BROWN);
+	glMaterialfv(GL_FRONT, GL_SPECULAR, BEAK_BROWN);
+	glMaterialf(GL_FRONT, GL_SHININESS, lowShininess);
+	gluCylinder(cylinderQuadric, 0.0, BEAK_SCALE_FACTOR, BEAK_SCALE_FACTOR, 20, 20);
+	glPopMatrix();
+
+
+	if (flip > 30 || flip < -30)
+		up *= -1;
+
+	flip += up;
+
+	// tail
+	glPushMatrix();
+	glRotated(-flip, 1, 0, 0);
+	glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
+	glMaterialfv(GL_FRONT, GL_DIFFUSE, BEAK_BROWN);
+	glMaterialfv(GL_FRONT, GL_SPECULAR, BEAK_BROWN);
+	glMaterialf(GL_FRONT, GL_SHININESS, lowShininess);
+
+	glBegin(GL_TRIANGLES);
+	glVertex3f(0, 0, 0);
+	glVertex3f(0.3f, 0, -BODY_RADIUS * 2);
+	glVertex3f(-0.3f, 0, -BODY_RADIUS * 2);
+	glEnd();
+	glPopMatrix();
+
+	// left wing
+	glPushMatrix();
+	glRotated(flip, 0, 0, 1);
+	glTranslated(BODY_RADIUS, 0.0, 0.0);
+	glScaled(1.5, 0.1, 0.5);
+
+	glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
+	glMaterialfv(GL_FRONT, GL_DIFFUSE, PALE_GREEN);
+	glMaterialfv(GL_FRONT, GL_SPECULAR, PALE_GREEN);
+	glMaterialf(GL_FRONT, GL_SHININESS, lowShininess);
+	gluSphere(sphereQuadric, BODY_RADIUS, 50, 50);
+	glPopMatrix();
+
+	// right wing
+	glPushMatrix();
+	glRotated(-flip, 0, 0, 1);
+	glTranslated(-BODY_RADIUS, 0.0, 0.0);
+	glScaled(1.5, 0.1, 0.5);
+
+	glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
+	glMaterialfv(GL_FRONT, GL_DIFFUSE, PALE_GREEN);
+	glMaterialfv(GL_FRONT, GL_SPECULAR, PALE_GREEN);
+	glMaterialf(GL_FRONT, GL_SHININESS, lowShininess);
+	gluSphere(sphereQuadric, BODY_RADIUS, 50, 50);
+	glPopMatrix();
+
+	// propeller
+	glPushMatrix();
+	glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
+	glMaterialfv(GL_FRONT, GL_DIFFUSE, PALE_GREEN);
+	glMaterialfv(GL_FRONT, GL_SPECULAR, PALE_GREEN);
+	glMaterialf(GL_FRONT, GL_SHININESS, lowShininess);
+	glNormal3f(0, 1, 0);
+
+	glTranslated(0.0, BODY_RADIUS + 0.1f, 0.0);
+	glRotated(propeller_angle, 0, 1, 0);
+
+	glBegin(GL_TRIANGLES);
+	glVertex3f(0, 0, 0);
+	glVertex3f(0.5f, 0, 0.2f);
+	glVertex3f(0.5f, 0, -0.2f);
+	glEnd();
+
+	glNormal3f(0, 1, 0);
+	glBegin(GL_TRIANGLES);
+	glVertex3f(0, 0, 0);
+	glVertex3f(-0.5f, 0, 0.2f);
+	glVertex3f(-0.5f, 0, -0.2f);
+	glEnd();
+	glPopMatrix();
+
+	glPopMatrix(); //end outer push
+}
+
+void drawOriginMarker(void)
+{
+	glEnable(GL_COLOR_MATERIAL);
+	glColor3f(0.0f, 1.0f, 1.0f);
+	glutWireSphere(0.1, 10, 10);
+
+	glBegin(GL_LINES);
+
+	//x axis -red
+	glColor3f(1.0f, 0.0f, 0.0f);
+	glVertex3f(0.0f, 0.0f, 0.0f);
+	glVertex3f(10.0f, 0.0f, 0.0f);
+
+	//y axis -green
+	glColor3f(0.0f, 1.0f, 0.0f);
+	glVertex3f(0.0f, 0.0f, 0.0f);
+	glVertex3f(0.0f, 10.0f, 0.0f);
+
+	//z axis - blue
+	glColor3f(0.0f, 0.0f, 1.0f);
+	glVertex3f(0.0f, 0.0f, 0.0f);
+	glVertex3f(0.0f, 0.0f, 10.0f);
+
+	glEnd();
+	glDisable(GL_COLOR_MATERIAL);
 }
 
 /****************************************2026****************************************/
