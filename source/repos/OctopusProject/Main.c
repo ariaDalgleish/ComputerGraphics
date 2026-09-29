@@ -106,6 +106,7 @@ motionstate4_t keyboardMotion = { MOTION_NONE, MOTION_NONE, MOTION_NONE, MOTION_
 #define KEY_MOVE_RIGHT		'd'
 #define KEY_RENDER_FILL		'l'
 #define KEY_EXIT			27 // Escape key.
+#define KEY_TOGGLE_BUBBLES	'b'
 
 // Define all GLUT special keys used for input (add any new key definitions here).
 
@@ -138,25 +139,69 @@ void initLights(void);
 /******************************************************************************
  * Animation-Specific Setup (Add your own definitions, constants, and globals here)
  ******************************************************************************/
-
+ 
+/******************************************************************************
+ * SCALE: mapping of real-world units to OpenGL units
+ *
+ *   1.0 GL unit = 1 metre.
+ *
+ * Target dimensions (metres):
+ *   - Body sphere:        1 m across (radius 0.5)
+ *   - Wingspan:           about 2.5 m (comparable to a large eagle)
+ *   - Tail:               1 m long
+ *   - Beak:               about 0.17 m long
+ *   - Eyes:               0.05 m (5 cm) radius
+ *   - Propeller blades:   0.25 m long
+ *   - Speed:              about 6 m/s (0.1 units/frame at ~60 FPS), roughly 22 km/h
+ *   - Turn rate:          about 60 degrees/s (1 degree/frame at ~60 FPS)
+ *   - Camera distance:    about 5 m from the bird (e.g. offset (3, 3, 3))
+ *   - Projection:         60 degree vertical FOV, near plane 0.1 m, far plane 500 m
+ *   - Origin marker axes: 10 m long, used as a visible scale ruler
+ *
+ ******************************************************************************/
+  
+//  (1 GL unit = 1 m)
 #define BODY_RADIUS 1.0
 #define EYE_RADIUS 0.1
 #define BEAK_SCALE_FACTOR BODY_RADIUS/3.0
 #define TO_RADIANS 3.1415926f/180.0f
+// Octopus settings. Sizes are in body-local units, before the 0.5 glScaled in display().
+#define LEG_COUNT 8
+#define LEG_RADIUS (BODY_RADIUS * 0.25)           // Each leg is a sphere this big.
+#define LEG_ELEVATION_DEGREES 55.0                // How far below the body's equator the legs sit.
+#define MOUTH_RING_RADIUS (BODY_RADIUS * 0.2)     // Centre of the mouth to the middle of its tube.
+#define MOUTH_TUBE_RADIUS (BODY_RADIUS * 0.06)    // Thickness of the mouth's tube.
+#define BUBBLE_COUNT 4
+#define BUBBLE_CYCLES_PER_SEC 0.5f                // Each bubble takes 2 s to rise and fade.
+
+// Seabed settings (metres, since 1 GL unit = 1 m). Change these to resize the grid.
+#define SEABED_SQUARES_PER_SIDE 50   // Number of squares along each side of the grid.
+#define SEABED_SQUARE_SIZE 2.0f      // Side length of one square (50 x 2 m = 100 m across).
+#define SEABED_Y (-5.0f)             // Height of the seabed relative to the origin (5 m below).
+
+#define PROPELLER_DEG_PER_SEC 600.0f   // About 100 RPM.
 
  // Render objects as filled polygons (1) or wireframes (0). Default filled.
 int renderFillEnabled = 1;
-
+int bubblesEnabled = 1;
 // window dimensions
 GLint windowWidth = 800;
 GLint windowHeight = 600;
 
+// Two sand tones, alternated in a checkerboard so the individual squares are visible.
+// These have 4 components because glMaterialfv reads r, g, b and a.
+GLfloat SAND_LIGHT[4] = { 0.62f, 0.56f, 0.38f, 1.0f };
+GLfloat SAND_DARK[4] = { 0.48f, 0.43f, 0.29f, 1.0f };
+
 double flip = 0;
 double up = 3;
 
-float eye_x = 5;
-float eye_y = 5;
-float eye_z = 5;
+// Camera position in metres. 
+// Target distance from the bird is about 5 m (e.g. 3, 3, 3), 
+// so the ~2.5 m wingspan fits in view.
+float eye_x = 3;
+float eye_y = 3;
+float eye_z = 3;
 
 float at_x = 0;
 float at_y = 0;
@@ -175,6 +220,9 @@ float propeller_rotating_speed = 0;
 int move = 0;
 float vx = 0;
 float vz = 0;
+
+float bubble_phase = 0;                           // 0 to 1, advanced in think().
+
 
 GLUquadricObj* sphereQuadric;
 GLUquadricObj* cylinderQuadric;
@@ -201,10 +249,19 @@ GLfloat BLACK[3] = { 0.0f, 0.0f, 0.0f };
 
 GLfloat WHITE[3] = { 1.0f, 1.0f, 1.0f };
 
-GLfloat lowShininess = 25.0;
+GLfloat PLUM[3] = { 0.424f, 0.098f, 0.549f };
+//rgb01(0.424, 0.098, 0.549)
 
-void drawBird(void);
+GLfloat MOUTH_PINK[4] = { 0.98f, 0.60f, 0.75f, 1.0f };
+
+GLfloat noShininess = 5.0;	
+GLfloat lowShininess = 25.0;
+GLfloat medShininess = 50.0;
+GLfloat highShininess = 100.0;
+
+void drawOctopus(void);
 void drawOriginMarker(void);
+void drawSeabed(void);
 
 
 /******************************************************************************
@@ -287,10 +344,12 @@ void display(void)
 		0.0, up_y, 0.0);
 
 	drawOriginMarker();
+	drawSeabed();
 
 	glTranslated(object_x, object_y, object_z);
 	glRotated(object_angle_xz, 0, 1, 0);
-	drawBird();
+	glScaled(0.5, 0.5, 0.5); // 1 m body (BODY_RADIUS 1.0 -> 0.5 m radius)
+	drawOctopus();
 
 	glutSwapBuffers();
 }
@@ -306,6 +365,8 @@ void reshape(int width, int height)
 
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
+	// Perspective projection in metres: 60 degree vertical FOV. 
+	// Target near plane is 0.1 m (10 cm) and far plane 500 m for a 1 m bird.
 	gluPerspective(60, (float)windowWidth / (float)windowHeight, 1.0, 5000.0);
 
 	glMatrixMode(GL_MODELVIEW);
@@ -333,12 +394,12 @@ void keyPressed(unsigned char key, int x, int y)
 	case ' ':
 		move = !move;
 		break;
-	case 'r':
+	/*case 'r':
 		if (propeller_rotating_speed == 0)
 			propeller_rotating_speed += 10;
 		else
 			propeller_rotating_speed = 0;
-		break;
+		break;*/
 	case KEY_MOVE_FORWARD:
 		motionKeyStates.MoveForward = KEYSTATE_DOWN;
 		keyboardMotion.Surge = MOTION_FORWARD;
@@ -367,6 +428,9 @@ void keyPressed(unsigned char key, int x, int y)
 
 	case KEY_RENDER_FILL:
 		renderFillEnabled = !renderFillEnabled;
+		break;
+	case KEY_TOGGLE_BUBBLES:
+		bubblesEnabled = !bubblesEnabled;
 		break;
 	case KEY_EXIT:
 		exit(0);
@@ -559,6 +623,8 @@ void init(void)
 
 	glEnable(GL_TEXTURE_2D);
 
+	// Deep sea blue for the water behind and beyond the seabed.
+	glClearColor(0.02f, 0.16f, 0.30f, 1.0f);
 	// enable depth testing
 	glEnable(GL_DEPTH_TEST);
 
@@ -633,6 +699,7 @@ void think(void)
 	}
 	if (keyboardMotion.Surge != MOTION_NONE) {
 		/* TEMPLATE: Move your object backward if .Surge < 0, or forward if .Surge > 0 */
+		
 	}
 	if (keyboardMotion.Sway != MOTION_NONE) {
 		/* TEMPLATE: Move (strafe) your object left if .Sway < 0, or right if .Sway > 0 */
@@ -641,7 +708,12 @@ void think(void)
 		/* TEMPLATE: Move your object down if .Heave < 0, or up if .Heave > 0 */
 	}
 
-	propeller_angle += propeller_rotating_speed;
+	// Spin the propeller only while the octopus is moving.
+	if (move)
+		propeller_angle = fmodf(propeller_angle + PROPELLER_DEG_PER_SEC * FRAME_TIME_SEC, 360.0f);
+	
+	bubble_phase = fmodf(bubble_phase + BUBBLE_CYCLES_PER_SEC * FRAME_TIME_SEC, 1.0f);
+	// Scale note: 0.1 units per frame at ~60 FPS is about 6 m/s (1 unit = 1 m), roughly 22 km/h.
 	vx = cosf(object_angle_xz * TO_RADIANS) * 0.1f;
 	vz = -sinf(object_angle_xz * TO_RADIANS) * 0.1f;
 	object_x += (vx * move);
@@ -686,18 +758,22 @@ void initLights(void)
 }
 
 
-void drawBird(void)
+void drawOctopus(void)
 {
+	int i;
+	double angle, elevation, mouthZ;
+	float t;
+	GLfloat bubbleColour[4];
+
 	renderFillEnabled ? gluQuadricDrawStyle(sphereQuadric, GLU_FILL) : gluQuadricDrawStyle(sphereQuadric, GLU_LINE);
-	renderFillEnabled ? gluQuadricDrawStyle(cylinderQuadric, GLU_FILL) : gluQuadricDrawStyle(cylinderQuadric, GLU_LINE);
 
 	// body
 	glPushMatrix();
 	glRotated(90, 0, 1, 0); // rotate x and z axes 90 degree
 	glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
-	glMaterialfv(GL_FRONT, GL_DIFFUSE, YELLOW);
-	glMaterialfv(GL_FRONT, GL_SPECULAR, YELLOW);
-	glMaterialf(GL_FRONT, GL_SHININESS, lowShininess);
+	glMaterialfv(GL_FRONT, GL_DIFFUSE, PLUM);
+	glMaterialfv(GL_FRONT, GL_SPECULAR, PLUM);
+	glMaterialf(GL_FRONT, GL_SHININESS, medShininess);
 
 	gluSphere(sphereQuadric, BODY_RADIUS, 50, 50);
 
@@ -721,16 +797,18 @@ void drawBird(void)
 	gluSphere(sphereQuadric, EYE_RADIUS, 50, 50);
 	glPopMatrix();
 
-	// beak
+	// mouth: a torus lying flat against the front of the body (its hole points along z).
+	// It is moved back from the beak's old position so the ring sits on the body's surface.
+	mouthZ = sqrt(BODY_RADIUS * BODY_RADIUS - MOUTH_RING_RADIUS * MOUTH_RING_RADIUS);
 	glPushMatrix();
-	glTranslated(0.0, 0.0, BODY_RADIUS + BODY_RADIUS / 4.0);
-	glRotated(-180, 0, 1, 0);
-	glScaled(0.5, 1.0, 1.0);
+	glTranslated(0.0, 0.0, mouthZ);
 	glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
-	glMaterialfv(GL_FRONT, GL_DIFFUSE, BEAK_BROWN);
-	glMaterialfv(GL_FRONT, GL_SPECULAR, BEAK_BROWN);
+	glMaterialfv(GL_FRONT, GL_DIFFUSE, MOUTH_PINK);
+	glMaterialfv(GL_FRONT, GL_SPECULAR, MOUTH_PINK);
 	glMaterialf(GL_FRONT, GL_SHININESS, lowShininess);
-	gluCylinder(cylinderQuadric, 0.0, BEAK_SCALE_FACTOR, BEAK_SCALE_FACTOR, 20, 20);
+	// GLUT's torus takes the tube radius first, then the radius of the ring itself.
+	renderFillEnabled ? glutSolidTorus(MOUTH_TUBE_RADIUS, MOUTH_RING_RADIUS, 20, 30)
+		: glutWireTorus(MOUTH_TUBE_RADIUS, MOUTH_RING_RADIUS, 20, 30);
 	glPopMatrix();
 
 
@@ -739,57 +817,64 @@ void drawBird(void)
 
 	flip += up;
 
-	// tail
-	glPushMatrix();
-	glRotated(-flip, 1, 0, 0);
+	// legs: eight spheres spaced evenly around the underside of the body
 	glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
-	glMaterialfv(GL_FRONT, GL_DIFFUSE, BEAK_BROWN);
-	glMaterialfv(GL_FRONT, GL_SPECULAR, BEAK_BROWN);
-	glMaterialf(GL_FRONT, GL_SHININESS, lowShininess);
+	glMaterialfv(GL_FRONT, GL_DIFFUSE, PLUM);
+	glMaterialfv(GL_FRONT, GL_SPECULAR, PLUM);
+	glMaterialf(GL_FRONT, GL_SHININESS, medShininess);
+	elevation = LEG_ELEVATION_DEGREES * 3.1415926 / 180.0;
+	for (i = 0; i < LEG_COUNT; i++)
+	{
+		angle = i * 2.0 * 3.1415926 / LEG_COUNT;
+		glPushMatrix();
+		glTranslated(BODY_RADIUS * cos(elevation) * cos(angle),
+			-BODY_RADIUS * sin(elevation),
+			BODY_RADIUS * cos(elevation) * sin(angle));
+		gluSphere(sphereQuadric, LEG_RADIUS, 20, 20);
+		glPopMatrix();
+	}
 
-	glBegin(GL_TRIANGLES);
-	glVertex3f(0, 0, 0);
-	glVertex3f(0.3f, 0, -BODY_RADIUS * 2);
-	glVertex3f(-0.3f, 0, -BODY_RADIUS * 2);
-	glEnd();
-	glPopMatrix();
+	//// left wing
+	//glPushMatrix();
+	//glRotated(flip, 0, 0, 1);
+	//glTranslated(BODY_RADIUS, 0.0, 0.0);
+	//glScaled(1.5, 0.1, 0.5);
 
-	// left wing
-	glPushMatrix();
-	glRotated(flip, 0, 0, 1);
-	glTranslated(BODY_RADIUS, 0.0, 0.0);
-	glScaled(1.5, 0.1, 0.5);
+	//glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
+	//glMaterialfv(GL_FRONT, GL_DIFFUSE, PALE_GREEN);
+	//glMaterialfv(GL_FRONT, GL_SPECULAR, PALE_GREEN);
+	//glMaterialf(GL_FRONT, GL_SHININESS, lowShininess);
+	//gluSphere(sphereQuadric, BODY_RADIUS, 50, 50);
+	//glPopMatrix();
 
-	glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
-	glMaterialfv(GL_FRONT, GL_DIFFUSE, PALE_GREEN);
-	glMaterialfv(GL_FRONT, GL_SPECULAR, PALE_GREEN);
-	glMaterialf(GL_FRONT, GL_SHININESS, lowShininess);
-	gluSphere(sphereQuadric, BODY_RADIUS, 50, 50);
-	glPopMatrix();
+	//// right wing
+	//glPushMatrix();
+	//glRotated(-flip, 0, 0, 1);
+	//glTranslated(-BODY_RADIUS, 0.0, 0.0);
+	//glScaled(1.5, 0.1, 0.5);
 
-	// right wing
-	glPushMatrix();
-	glRotated(-flip, 0, 0, 1);
-	glTranslated(-BODY_RADIUS, 0.0, 0.0);
-	glScaled(1.5, 0.1, 0.5);
+	//glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
+	//glMaterialfv(GL_FRONT, GL_DIFFUSE, PALE_GREEN);
+	//glMaterialfv(GL_FRONT, GL_SPECULAR, PALE_GREEN);
+	//glMaterialf(GL_FRONT, GL_SHININESS, lowShininess);
+	//gluSphere(sphereQuadric, BODY_RADIUS, 50, 50);
+	//glPopMatrix();
 
-	glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
-	glMaterialfv(GL_FRONT, GL_DIFFUSE, PALE_GREEN);
-	glMaterialfv(GL_FRONT, GL_SPECULAR, PALE_GREEN);
-	glMaterialf(GL_FRONT, GL_SHININESS, lowShininess);
-	gluSphere(sphereQuadric, BODY_RADIUS, 50, 50);
-	glPopMatrix();
-
+	// Scale note: propeller blades are 0.5 units long here;
+	// target is 0.25 m for a 1 m body (0.5 m at BODY_RADIUS 1.0).
+	
 	// propeller
 	glPushMatrix();
+	//glTranslated(0.0, 0.0, BODY_RADIUS - BODY_RADIUS * 2.0); // move the propeller to the front of the bird
 	glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
-	glMaterialfv(GL_FRONT, GL_DIFFUSE, PALE_GREEN);
-	glMaterialfv(GL_FRONT, GL_SPECULAR, PALE_GREEN);
+	glMaterialfv(GL_FRONT, GL_DIFFUSE, PLUM);
+	glMaterialfv(GL_FRONT, GL_SPECULAR, PLUM);
 	glMaterialf(GL_FRONT, GL_SHININESS, lowShininess);
-	glNormal3f(0, 1, 0);
+	glNormal3f(0, 1, 0); // normal for the propeller blades (pointing up the y axis)
 
-	glTranslated(0.0, BODY_RADIUS + 0.1f, 0.0);
-	glRotated(propeller_angle, 0, 1, 0);
+	glTranslated(0, 0, -BODY_RADIUS); // move the propeller to the back of the bird
+	glRotated(90, 1, 0, 0);
+	glRotated(propeller_angle, 0, 1, 0); // rotate the propeller around the y axis
 
 	glBegin(GL_TRIANGLES);
 	glVertex3f(0, 0, 0);
@@ -804,6 +889,38 @@ void drawBird(void)
 	glVertex3f(-0.5f, 0, -0.2f);
 	glEnd();
 	glPopMatrix();
+
+	// bubbles: translucent spheres that rise from the mouth, grow and fade.
+	// Drawn last so they blend over everything else.
+	
+	// bubbles ...
+	if (bubblesEnabled)
+	{
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		glDepthMask(GL_FALSE); // see-through bubbles shouldn't hide what is behind them
+		glMaterialfv(GL_FRONT, GL_SPECULAR, WHITE);
+		glMaterialf(GL_FRONT, GL_SHININESS, highShininess);
+		for (i = 0; i < BUBBLE_COUNT; i++)
+		{
+			t = fmodf(bubble_phase + (float)i / BUBBLE_COUNT, 1.0f); // 0 = just left the mouth, 1 = gone
+
+			bubbleColour[0] = 0.7f;
+			bubbleColour[1] = 0.9f;
+			bubbleColour[2] = 1.0f;
+			bubbleColour[3] = 0.7f * (1.0f - t); // fade out as it rises
+			glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, bubbleColour);
+
+			glPushMatrix();
+			glTranslated(BODY_RADIUS * 0.08 * sin(t * 10.0 + i),  // small sideways wobble
+				BODY_RADIUS * (0.1 + 1.4 * t),                     // rise
+				BODY_RADIUS * (1.2 + 0.3 * t));                    // drift forward, past the mouth
+			gluSphere(sphereQuadric, BODY_RADIUS * (0.05 + 0.10 * t), 16, 16); // grow as it rises
+			glPopMatrix();
+		}
+		glDepthMask(GL_TRUE);
+		glDisable(GL_BLEND);
+	}
 
 	glPopMatrix(); //end outer push
 }
@@ -835,4 +952,42 @@ void drawOriginMarker(void)
 	glDisable(GL_COLOR_MATERIAL);
 }
 
+/*
+	Draws a grid of squares on the X-Z plane, centred on the origin, at height SEABED_Y.
+	The grid is SEABED_SQUARES_PER_SIDE squares wide and deep, and each square is
+	SEABED_SQUARE_SIZE metres across.
+*/
+void drawSeabed(void) 
+{
+	int i, j;
+	float half = SEABED_SQUARES_PER_SIDE * SEABED_SQUARE_SIZE / 2.0f;
+
+	// Wireframe when renderFillEnabled is 0, filled when it is 1.
+	glPolygonMode(GL_FRONT_AND_BACK, renderFillEnabled ? GL_FILL : GL_LINE);
+
+	glDisable(GL_COLOR_MATERIAL);                       // Use the material colours below.
+	glMaterialfv(GL_FRONT, GL_SPECULAR, zeroMaterial);  // Sand isn't shiny.
+	glNormal3f(0.0f, 1.0f, 0.0f);                       // Every square faces straight up.
+
+	glBegin(GL_QUADS);
+	for (i = 0; i < SEABED_SQUARES_PER_SIDE; i++)
+	{
+		for (j = 0; j < SEABED_SQUARES_PER_SIDE; j++)
+		{
+			float x0 = -half + i * SEABED_SQUARE_SIZE;
+			float z0 = -half + j * SEABED_SQUARE_SIZE;
+			float x1 = x0 + SEABED_SQUARE_SIZE;
+			float z1 = z0 + SEABED_SQUARE_SIZE;
+
+			glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, ((i + j) % 2 == 0) ? SAND_LIGHT : SAND_DARK);
+
+			// Counter-clockwise when viewed from above, so the front face points up.
+			glVertex3f(x0, SEABED_Y, z0);
+			glVertex3f(x0, SEABED_Y, z1);
+			glVertex3f(x1, SEABED_Y, z1);
+			glVertex3f(x1, SEABED_Y, z0);
+		}
+	}
+	glEnd();
+}
 /****************************************2026****************************************/

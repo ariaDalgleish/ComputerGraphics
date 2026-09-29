@@ -1,6 +1,10 @@
 {
   "ExpandedNodes": [
-    ""
+    "",
+    "\\source",
+    "\\source\\repos",
+    "\\source\\repos\\OctopusProject"
   ],
+  "SelectedNode": "\\source\\repos\\OctopusProject",
   "PreviewInSolutionExplorer": false
 }

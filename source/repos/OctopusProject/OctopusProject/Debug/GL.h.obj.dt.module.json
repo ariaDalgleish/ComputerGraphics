@@ -1,0 +1,14 @@
+{
+    "version": 1,
+    "revision": 0,
+    "rules": [
+        {
+            "primary-output": "OctopusProject\\Debug\\GL.obj",
+            "outputs": [
+                "OctopusProject\\Debug\\GL.h.obj.dt.module.json",
+                "OctopusProject\\Debug\\GL.h.obj.dt.d.json"
+            ],
+            "requires": []
+        }
+    ]
+}
