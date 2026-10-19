@@ -1,0 +1,14 @@
+{
+    "version": 1,
+    "revision": 0,
+    "rules": [
+        {
+            "primary-output": "OctopusProject\\Debug\\freeglut_std.obj",
+            "outputs": [
+                "OctopusProject\\Debug\\freeglut_std.h.obj.dt.module.json",
+                "OctopusProject\\Debug\\freeglut_std.h.obj.dt.d.json"
+            ],
+            "requires": []
+        }
+    ]
+}
