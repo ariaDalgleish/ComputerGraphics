@@ -107,6 +107,7 @@ motionstate4_t keyboardMotion = { MOTION_NONE, MOTION_NONE, MOTION_NONE, MOTION_
 #define KEY_RENDER_FILL		'l'
 #define KEY_EXIT			27 // Escape key.
 #define KEY_TOGGLE_BUBBLES	'b'
+#define KEY_TOGGLE_PROPELLER ' '   // spacebar
 
 // Define all GLUT special keys used for input (add any new key definitions here).
 
@@ -135,31 +136,15 @@ void main(int argc, char** argv);
 void init(void);
 void think(void);
 void initLights(void);
+void drawOctopus(void);
+void drawOriginMarker(void);
+void drawSeabed(void);
 
 /******************************************************************************
  * Animation-Specific Setup (Add your own definitions, constants, and globals here)
  ******************************************************************************/
- 
-/******************************************************************************
- * SCALE: mapping of real-world units to OpenGL units
- *
- *   1.0 GL unit = 1 metre.
- *
- * Target dimensions (metres):
- *   - Body sphere:        1 m across (radius 0.5)
- *   - Wingspan:           about 2.5 m (comparable to a large eagle)
- *   - Tail:               1 m long
- *   - Beak:               about 0.17 m long
- *   - Eyes:               0.05 m (5 cm) radius
- *   - Propeller blades:   0.25 m long
- *   - Speed:              about 6 m/s (0.1 units/frame at ~60 FPS), roughly 22 km/h
- *   - Turn rate:          about 60 degrees/s (1 degree/frame at ~60 FPS)
- *   - Camera distance:    about 5 m from the bird (e.g. offset (3, 3, 3))
- *   - Projection:         60 degree vertical FOV, near plane 0.1 m, far plane 500 m
- *   - Origin marker axes: 10 m long, used as a visible scale ruler
- *
- ******************************************************************************/
-  
+
+//  SCALE: mapping of real-world units to OpenGL units
 //  (1 GL unit = 1 m)
 #define BODY_RADIUS 1.0
 #define EYE_RADIUS 0.1
@@ -179,11 +164,32 @@ void initLights(void);
 #define SEABED_SQUARE_SIZE 2.0f      // Side length of one square (50 x 2 m = 100 m across).
 #define SEABED_Y (-5.0f)             // Height of the seabed relative to the origin (5 m below).
 
+// Camera settings (metres, since 1 GL unit = 1 m).
+#define CAMERA_BEHIND 4.0   // Metres behind the octopus, along its heading.
+#define CAMERA_ABOVE  3.0   // Metres above the octopus (4 behind + 3 up = 5 m away).
 #define PROPELLER_DEG_PER_SEC 600.0f   // About 100 RPM.
+#define TURN_RATE_DEG_PER_SEC 90.0   // Yaw speed.
+#define LEG_DEG_PER_SEC 120.0f        // Legs spin slower than the propeller so it reads clearly.
+#define SPIN_UP_TIME 0.6f             // Seconds from stopped to full speed.
+#define SPIN_DOWN_TIME 0.8f           // Seconds to wind down after the keys are released.
+#define MOVE_SPIN_THRESHOLD 0.5f      // Octopus can't translate until spinLevel reaches this.
+
+float spinLevel = 0;                  // 0 = stopped, 1 = full speed. Starts switched off.
+float leg_angle = 0;
+float objectLocation[3] = { 0, 0, 0 }; // x, y (up), z
+float propeller_angle = 0;
+float propeller_rotating_speed = 0;
+float bubble_phase = 0;                           // 0 to 1, advanced in think().
+const float moveSpeed = 3.0f; // metres per second
+int propellerOn = 0;   // propeller and feet start switched off
+double heading = 0;                  // Degrees. 0 = facing +X, increasing = anticlockwise from above.
 
  // Render objects as filled polygons (1) or wireframes (0). Default filled.
 int renderFillEnabled = 1;
+
 int bubblesEnabled = 1;
+int smoothOn = 1;
+
 // window dimensions
 GLint windowWidth = 800;
 GLint windowHeight = 600;
@@ -192,37 +198,6 @@ GLint windowHeight = 600;
 // These have 4 components because glMaterialfv reads r, g, b and a.
 GLfloat SAND_LIGHT[4] = { 0.62f, 0.56f, 0.38f, 1.0f };
 GLfloat SAND_DARK[4] = { 0.48f, 0.43f, 0.29f, 1.0f };
-
-double flip = 0;
-double up = 3;
-
-// Camera position in metres. 
-// Target distance from the bird is about 5 m (e.g. 3, 3, 3), 
-// so the ~2.5 m wingspan fits in view.
-float eye_x = 3;
-float eye_y = 3;
-float eye_z = 3;
-
-float at_x = 0;
-float at_y = 0;
-float at_z = 0;
-
-float up_y = 1;
-
-int smoothOn = 1;
-
-float object_angle_xz;
-float object_x;
-float object_y;
-float object_z;
-float propeller_angle = 0;
-float propeller_rotating_speed = 0;
-int move = 0;
-float vx = 0;
-float vz = 0;
-
-float bubble_phase = 0;                           // 0 to 1, advanced in think().
-
 
 GLUquadricObj* sphereQuadric;
 GLUquadricObj* cylinderQuadric;
@@ -258,10 +233,6 @@ GLfloat noShininess = 5.0;
 GLfloat lowShininess = 25.0;
 GLfloat medShininess = 50.0;
 GLfloat highShininess = 100.0;
-
-void drawOctopus(void);
-void drawOriginMarker(void);
-void drawSeabed(void);
 
 
 /******************************************************************************
@@ -335,19 +306,27 @@ void display(void)
 		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 	else
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	at_x = object_x;
-	at_y = object_y;
-	at_z = object_z;
 
-	gluLookAt(eye_x, eye_y, eye_z,
-		at_x, at_y, at_z, //looking at the origin
-		0.0, up_y, 0.0);
+	// Camera position relative to the object, in metres!!
+	double r = heading * (3.1415926 / 180.0);
+	double at_x = objectLocation[0];
+	double at_y = objectLocation[1];
+	double at_z = objectLocation[2];
+
+	// Target distance from the bird is about 5 m (e.g. 3, 3, 3), 
+	double eyeX = at_x - CAMERA_BEHIND * cos(r);
+	double eyeY = at_y + CAMERA_ABOVE;
+	double eyeZ = at_z + CAMERA_BEHIND * sin(r);
+
+	gluLookAt(eyeX, eyeY, eyeZ,
+		at_x, at_y, at_z,
+		0.0, 1.0, 0.0);
 
 	drawOriginMarker();
 	drawSeabed();
 
-	glTranslated(object_x, object_y, object_z);
-	glRotated(object_angle_xz, 0, 1, 0);
+	glTranslated(objectLocation[0], objectLocation[1], objectLocation[2]);
+	glRotated(heading, 0, 1, 0);
 	glScaled(0.5, 0.5, 0.5); // 1 m body (BODY_RADIUS 1.0 -> 0.5 m radius)
 	drawOctopus();
 
@@ -391,15 +370,7 @@ void keyPressed(unsigned char key, int x, int y)
 				you're holding down KEY_MOVE_LEFT then also pressed KEY_MOVE_RIGHT,
 				our object will immediately start moving right).
 		*/
-	case ' ':
-		move = !move;
-		break;
-	/*case 'r':
-		if (propeller_rotating_speed == 0)
-			propeller_rotating_speed += 10;
-		else
-			propeller_rotating_speed = 0;
-		break;*/
+	
 	case KEY_MOVE_FORWARD:
 		motionKeyStates.MoveForward = KEYSTATE_DOWN;
 		keyboardMotion.Surge = MOTION_FORWARD;
@@ -431,6 +402,9 @@ void keyPressed(unsigned char key, int x, int y)
 		break;
 	case KEY_TOGGLE_BUBBLES:
 		bubblesEnabled = !bubblesEnabled;
+		break;
+	case KEY_TOGGLE_PROPELLER:
+		propellerOn = !propellerOn;
 		break;
 	case KEY_EXIT:
 		exit(0);
@@ -690,34 +664,54 @@ void think(void)
 		Keyboard motion handler: complete this section to make your "player-controlled"
 		object respond to keyboard input.
 	*/
+
+	double rad = heading * (3.1415926 / 180.0);
+	float movedThisFrame = moveSpeed * FRAME_TIME_SEC;   // Metres moved this frame.
+
+	// Does the player want to translate in any direction? (Yaw doesn't count.)
+	int wantsToMove = (keyboardMotion.Surge != MOTION_NONE ||
+		keyboardMotion.Sway != MOTION_NONE ||
+		keyboardMotion.Heave != MOTION_NONE);
+
+	// Spin up while a movement key is held, wind down otherwise.
+	if (wantsToMove)
+		spinLevel += FRAME_TIME_SEC / SPIN_UP_TIME;
+	else
+		spinLevel -= FRAME_TIME_SEC / SPIN_DOWN_TIME;
+	if (spinLevel > 1.0f) spinLevel = 1.0f;
+	if (spinLevel < 0.0f) spinLevel = 0.0f;
+
+	// Propeller and legs spin in opposite directions (note the minus on the legs).
+	propeller_angle = fmodf(propeller_angle + PROPELLER_DEG_PER_SEC * spinLevel * FRAME_TIME_SEC, 360.0f);
+	leg_angle = fmodf(leg_angle - LEG_DEG_PER_SEC * spinLevel * FRAME_TIME_SEC, 360.0f);
+
+	// Yaw does not need the propeller or legs.
 	if (keyboardMotion.Yaw != MOTION_NONE) {
 		/* TEMPLATE: Turn your object right (clockwise) if .Yaw < 0, or left (anticlockwise) if .Yaw > 0 */
-		if (keyboardMotion.Yaw > 0)
-			object_angle_xz++;
-		else
-			object_angle_xz--;
-	}
-	if (keyboardMotion.Surge != MOTION_NONE) {
-		/* TEMPLATE: Move your object backward if .Surge < 0, or forward if .Surge > 0 */
-		
-	}
-	if (keyboardMotion.Sway != MOTION_NONE) {
-		/* TEMPLATE: Move (strafe) your object left if .Sway < 0, or right if .Sway > 0 */
-	}
-	if (keyboardMotion.Heave != MOTION_NONE) {
-		/* TEMPLATE: Move your object down if .Heave < 0, or up if .Heave > 0 */
+		heading += keyboardMotion.Yaw * TURN_RATE_DEG_PER_SEC * FRAME_TIME_SEC;
+		if (heading >= 360.0) heading -= 360.0;
+		if (heading < 0.0)    heading += 360.0;
 	}
 
-	// Spin the propeller only while the octopus is moving.
-	if (move)
-		propeller_angle = fmodf(propeller_angle + PROPELLER_DEG_PER_SEC * FRAME_TIME_SEC, 360.0f);
-	
+	// Translation only happens once the propeller and legs are spinning fast enough.
+	if (spinLevel >= MOVE_SPIN_THRESHOLD) {
+		if (keyboardMotion.Surge != MOTION_NONE) {
+			/* TEMPLATE: Move your object backward if .Surge < 0, or forward if .Surge > 0 */
+			objectLocation[0] += keyboardMotion.Surge * (float)cos(rad) * movedThisFrame;
+			objectLocation[2] -= keyboardMotion.Surge * (float)sin(rad) * movedThisFrame;
+		}
+		if (keyboardMotion.Sway != MOTION_NONE) {
+			/* TEMPLATE: Move (strafe) your object left if .Sway < 0, or right if .Sway > 0 */
+			objectLocation[0] += keyboardMotion.Sway * (float)sin(rad) * movedThisFrame;
+			objectLocation[2] += keyboardMotion.Sway * (float)cos(rad) * movedThisFrame;
+		}
+		if (keyboardMotion.Heave != MOTION_NONE) {
+			/* TEMPLATE: Move your object down if .Heave < 0, or up if .Heave > 0 */
+			objectLocation[1] += keyboardMotion.Heave * movedThisFrame;
+		}
+	}
+
 	bubble_phase = fmodf(bubble_phase + BUBBLE_CYCLES_PER_SEC * FRAME_TIME_SEC, 1.0f);
-	// Scale note: 0.1 units per frame at ~60 FPS is about 6 m/s (1 unit = 1 m), roughly 22 km/h.
-	vx = cosf(object_angle_xz * TO_RADIANS) * 0.1f;
-	vz = -sinf(object_angle_xz * TO_RADIANS) * 0.1f;
-	object_x += (vx * move);
-	object_z += (vz * move);
 }
 
 /*
@@ -811,18 +805,15 @@ void drawOctopus(void)
 		: glutWireTorus(MOUTH_TUBE_RADIUS, MOUTH_RING_RADIUS, 20, 30);
 	glPopMatrix();
 
-
-	if (flip > 30 || flip < -30)
-		up *= -1;
-
-	flip += up;
-
 	// legs: eight spheres spaced evenly around the underside of the body
 	glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
 	glMaterialfv(GL_FRONT, GL_DIFFUSE, PLUM);
 	glMaterialfv(GL_FRONT, GL_SPECULAR, PLUM);
 	glMaterialf(GL_FRONT, GL_SHININESS, medShininess);
 	elevation = LEG_ELEVATION_DEGREES * 3.1415926 / 180.0;
+
+	glPushMatrix();                     
+	glRotated(leg_angle, 0, 1, 0);      
 	for (i = 0; i < LEG_COUNT; i++)
 	{
 		angle = i * 2.0 * 3.1415926 / LEG_COUNT;
@@ -833,35 +824,7 @@ void drawOctopus(void)
 		gluSphere(sphereQuadric, LEG_RADIUS, 20, 20);
 		glPopMatrix();
 	}
-
-	//// left wing
-	//glPushMatrix();
-	//glRotated(flip, 0, 0, 1);
-	//glTranslated(BODY_RADIUS, 0.0, 0.0);
-	//glScaled(1.5, 0.1, 0.5);
-
-	//glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
-	//glMaterialfv(GL_FRONT, GL_DIFFUSE, PALE_GREEN);
-	//glMaterialfv(GL_FRONT, GL_SPECULAR, PALE_GREEN);
-	//glMaterialf(GL_FRONT, GL_SHININESS, lowShininess);
-	//gluSphere(sphereQuadric, BODY_RADIUS, 50, 50);
-	//glPopMatrix();
-
-	//// right wing
-	//glPushMatrix();
-	//glRotated(-flip, 0, 0, 1);
-	//glTranslated(-BODY_RADIUS, 0.0, 0.0);
-	//glScaled(1.5, 0.1, 0.5);
-
-	//glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
-	//glMaterialfv(GL_FRONT, GL_DIFFUSE, PALE_GREEN);
-	//glMaterialfv(GL_FRONT, GL_SPECULAR, PALE_GREEN);
-	//glMaterialf(GL_FRONT, GL_SHININESS, lowShininess);
-	//gluSphere(sphereQuadric, BODY_RADIUS, 50, 50);
-	//glPopMatrix();
-
-	// Scale note: propeller blades are 0.5 units long here;
-	// target is 0.25 m for a 1 m body (0.5 m at BODY_RADIUS 1.0).
+	glPopMatrix();                      
 	
 	// propeller
 	glPushMatrix();
